@@ -1,0 +1,5 @@
+# Code Diff Analyzer 流水线依赖
+# 说明：bug_correlate.py 读 TAPD Bug Excel 需 openpyxl；
+#       bug_trend / gen_combined_report / gen_p1_cases / pipeline_wrapper 仅用标准库。
+# Phase 4 若嵌入 LLM 语义分析，再追加对应 SDK（如 openai / dashscope）。
+openpyxl>=3.1.0

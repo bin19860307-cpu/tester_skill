@@ -1,0 +1,372 @@
+# -*- coding: utf-8 -*-
+"""
+bug_correlate.py  —  Code Diff Analyzer · Flow A + Flow B 固化脚本
+
+功能：
+  1. 读取固定格式的 TAPD Bug 导出 Excel（sheet 名 `bug`，17 列）
+  2. 按权威字段规范化（编号去 .0、状态/严重程度映射）
+  3. 全量覆写对应服务的 version_bugs.json（以 xlsx 权威状态为准，杜绝"凭推断标未解决"）
+  4. 运行映射引擎，全量重建 cross_reference.json
+
+设计原则（来自 81013 误标教训）：
+  - xlsx 的 `状态` 列是唯一权威来源；已关闭/已解决/关闭 => closed，其余 => open
+  - 每次运行都从 xlsx 重新生成全部 bug 记录，不 append、不保留"记忆中的旧状态"
+  - 列名采用"精确匹配 + 关键词兜底"双策略，但本脚本首要服务已固化的 17 列格式
+
+用法：
+  python bug_correlate.py --xlsx "路径/5.2.0.9bug列表.xlsx" --service portal-backend
+  python bug_correlate (自动探测服务)  ... 见 --help
+依赖：openpyxl（仅读 xlsx 时需要）
+"""
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, date
+
+try:
+    import openpyxl
+except ImportError:
+    sys.stderr.write("[ERROR] 缺少 openpyxl，请先 pip install openpyxl\n")
+    sys.exit(2)
+
+
+# ----------------------------------------------------------------------------
+# 列名映射：精确列名（已固化格式） + 关键词兜底
+# ----------------------------------------------------------------------------
+COLUMN_MAP = {
+    "bug_id":            ["编号", "Bug ID", "缺陷ID", "ID"],
+    "title":             ["标题", "缺陷标题", "描述", "摘要"],
+    "creator":           ["创建人"],
+    "found_date":        ["创建日期", "发现日期"],
+    "resolver":          ["解决者"],
+    "fixed_date":        ["解决日期"],
+    "closed_date":       ["关闭日期"],
+    "status":            ["状态", "缺陷状态"],
+    "found_in_version":  ["产生版本", "发现版本", "影响版本", "版本"],
+    "fixed_in_version":  ["解决版本", "修复版本"],
+    "bug_type":          ["bug类型", "类型"],
+    "severity":          ["严重程度", "严重级别", "优先级", "等级", "Severity"],
+    "activation":        ["激活次数"],
+    "disposition":       ["处置方式"],
+    "plan":              ["方案"],
+    "detail":            ["详细处理方式"],
+    "module":            ["模块", "所属模块", "功能模块"],
+}
+
+
+def build_header_index(headers):
+    """根据表头行构建 标准字段 -> 列下标 的映射（精确优先，关键词兜底）。"""
+    idx = {}
+    norm_headers = [(str(h).strip() if h is not None else "") for h in headers]
+    for field, variants in COLUMN_MAP.items():
+        # 1) 精确匹配
+        hit = None
+        for v in variants:
+            if v in norm_headers:
+                hit = norm_headers.index(v)
+                break
+        # 2) 关键词兜底（包含即可，忽略大小写/空格）
+        if hit is None:
+            for vi, hraw in enumerate(norm_headers):
+                if hraw:
+                    low = hraw.replace(" ", "").lower()
+                    if any(v.replace(" ", "").lower() in low for v in variants):
+                        hit = vi
+                        break
+        if hit is not None:
+            idx[field] = hit
+    return idx
+
+
+# ----------------------------------------------------------------------------
+# 规范化辅助
+# ----------------------------------------------------------------------------
+def norm_str(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s in ("", "-", "—", "/", "None", "nan"):
+        return None
+    return s
+
+
+def to_id(v):
+    if v is None:
+        return None
+    if isinstance(v, float):
+        if v.is_integer():
+            return str(int(v))
+        return str(v)
+    if isinstance(v, int):
+        return str(v)
+    s = str(v).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s or None
+
+
+def to_iso(v):
+    if v is None:
+        return None
+    if isinstance(v, (datetime, date)):
+        return v.strftime("%Y-%m-%d") if isinstance(v, date) and not isinstance(v, datetime) else v.strftime("%Y-%m-%d")
+    s = str(v).strip()
+    if not s or s in ("-", "—", "/", "None", "nan"):
+        return None
+    # 截断时间部分只留日期（如 "2026-07-21 14:32:44"）
+    return s.split(" ")[0]
+
+
+STATUS_CLOSED = {"已关闭", "已解决", "关闭"}
+SEV_MAP = {
+    "严重": "critical", "高": "high", "一般": "medium",
+    "中": "medium", "低": "low", "建议": "low",
+}
+
+
+def map_status(raw):
+    s = norm_str(raw)
+    return "closed" if (s and s in STATUS_CLOSED) else "open"
+
+
+def map_severity(raw):
+    s = norm_str(raw)
+    return SEV_MAP.get(s, "medium") if s else "medium"
+
+
+def version_key(v):
+    """把版本号转成可排序的元组。支持 5.2.0.9 / v1.2.34 / business-5.2.0.8 等。"""
+    if not v:
+        return (0,)
+    s = str(v).lower()
+    parts = []
+    for tok in "".join(c if c.isdigit() or c == "." else " " for c in s).split():
+        for n in tok.split("."):
+            if n.isdigit():
+                parts.append(int(n))
+    return tuple(parts) if parts else (0,)
+
+
+# ----------------------------------------------------------------------------
+# 读取 + 规范化
+# ----------------------------------------------------------------------------
+def parse_xlsx(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb["bug"] if "bug" in wb.sheetnames else wb.worksheets[0]
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return [], []
+    headers = [str(h).strip() if h is not None else "" for h in rows[0]]
+    hidx = build_header_index(rows[0])
+    bugs = []
+    for r in rows[1:]:
+        bid = to_id(r[hidx["bug_id"]]) if "bug_id" in hidx else None
+        if not bid:
+            continue
+        raw_sev = r[hidx["severity"]] if "severity" in hidx else None
+        bugs.append({
+            "bug_id": bid,
+            "title": norm_str(r[hidx["title"]]) if "title" in hidx else None,
+            "severity": map_severity(raw_sev),
+            "severity_raw": norm_str(raw_sev),
+            "status": map_status(r[hidx["status"]]) if "status" in hidx else "open",
+            "module": norm_str(r[hidx["module"]]) if "module" in hidx else None,
+            "bug_type": norm_str(r[hidx["bug_type"]]) if "bug_type" in hidx else None,
+            "found_in_version": norm_str(r[hidx["found_in_version"]]) if "found_in_version" in hidx else None,
+            "fixed_in_version": norm_str(r[hidx["fixed_in_version"]]) if "fixed_in_version" in hidx else None,
+            "creator": norm_str(r[hidx["creator"]]) if "creator" in hidx else None,
+            "resolver": norm_str(r[hidx["resolver"]]) if "resolver" in hidx else None,
+            "found_date": to_iso(r[hidx["found_date"]]) if "found_date" in hidx else None,
+            "fixed_date": to_iso(r[hidx["fixed_date"]]) if "fixed_date" in hidx else None,
+            "closed_date": to_iso(r[hidx["closed_date"]]) if "closed_date" in hidx else None,
+            "activation": to_id(r[hidx["activation"]]) if "activation" in hidx else None,
+            "disposition": norm_str(r[hidx["disposition"]]) if "disposition" in hidx else None,
+            "plan": norm_str(r[hidx["plan"]]) if "plan" in hidx else None,
+            "detail": norm_str(r[hidx["detail"]]) if "detail" in hidx else None,
+            "related_files": [],
+            "related_commits": [],
+            "tags": [],
+        })
+    return headers, bugs
+
+
+# ----------------------------------------------------------------------------
+# 自动探测服务
+# ----------------------------------------------------------------------------
+def detect_service(analytics_root, bug_versions):
+    """扫描所有服务的 version_chain.json，找出包含 bug 版本最多的服务。"""
+    best, best_count = None, -1
+    if not os.path.isdir(analytics_root):
+        return None
+    for svc in os.listdir(analytics_root):
+        chain_path = os.path.join(analytics_root, svc, "version_chain.json")
+        if not os.path.isfile(chain_path):
+            continue
+        try:
+            chain = json.load(open(chain_path, encoding="utf-8"))
+        except Exception:
+            continue
+        known = {v.get("version") for v in chain.get("versions", [])}
+        cnt = sum(1 for bv in bug_versions if bv in known)
+        if cnt > best_count:
+            best, best_count = svc, cnt
+    return best if best_count > 0 else None
+
+
+# ----------------------------------------------------------------------------
+# 映射引擎（Flow B）— 全量重建 cross_reference.json
+# ----------------------------------------------------------------------------
+def run_mapping_engine(service, analytics_root, bugs):
+    svc_dir = os.path.join(analytics_root, service)
+    chain_path = os.path.join(svc_dir, "version_chain.json")
+    metrics_path = os.path.join(svc_dir, "service_metrics.json")
+
+    versions_in_chain = []
+    parent_map = {}
+    if os.path.isfile(chain_path):
+        try:
+            chain = json.load(open(chain_path, encoding="utf-8"))
+            for v in chain.get("versions", []):
+                ver = v.get("version")
+                if ver:
+                    versions_in_chain.append(ver)
+                    if v.get("parent"):
+                        parent_map[ver] = v["parent"]
+        except Exception:
+            pass
+
+    metrics_map = {}
+    if os.path.isfile(metrics_path):
+        try:
+            m = json.load(open(metrics_path, encoding="utf-8"))
+            for rec in m.get("records", []):
+                if rec.get("version_to"):
+                    metrics_map[rec["version_to"]] = rec
+        except Exception:
+            pass
+
+    # 版本全集 = 链路版本 ∪ bug 涉及版本
+    all_versions = set(versions_in_chain)
+    for b in bugs:
+        if b.get("found_in_version"):
+            all_versions.add(b["found_in_version"])
+        if b.get("fixed_in_version"):
+            all_versions.add(b["fixed_in_version"])
+    ordered = sorted(all_versions, key=version_key)
+
+    # 补全 parent：链路没有的版本，取排序中前一个版本
+    for i, v in enumerate(ordered):
+        if v not in parent_map and i > 0:
+            parent_map[v] = ordered[i - 1]
+
+    DETECTION_KEYS = ["data_format_change", "version_rollback", "sensitive_info",
+                      "test_sync_needed", "circular_dependency"]
+
+    mappings = []
+    for i, v in enumerate(ordered):
+        if i == 0:
+            continue  # 首个版本无父版本，跳过
+        parent = parent_map.get(v, ordered[i - 1])
+        found = [b["bug_id"] for b in bugs if b.get("found_in_version") == v]
+        fixed = [b["bug_id"] for b in bugs if b.get("fixed_in_version") == v]
+        rec = metrics_map.get(v)
+        files_changed = rec.get("metrics", {}).get("files_changed") if rec else None
+        ratio = round(len(found) / files_changed, 4) if files_changed else None
+        det = rec.get("detections", {}) if rec else {}
+        has_bug = bool(found or fixed)
+        detection_precision = {}
+        for k in DETECTION_KEYS:
+            hit = bool(det.get(k))
+            detection_precision[k] = {
+                "hit_with_bug": 1 if (hit and has_bug) else 0,
+                "hit_total": 1 if hit else 0,
+            }
+        mappings.append({
+            "version_range": f"{parent}→{v}",
+            "bugs_found_in_version": found,
+            "bugs_fixed_in_version": fixed,
+            "change_to_bug_ratio": ratio,
+            "high_risk_changes_with_bugs": [],
+            "commits_with_bugs": [],
+            "detection_precision": detection_precision,
+        })
+
+    out = {
+        "service": service,
+        "schema_version": "1.0",
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "mappings": mappings,
+    }
+    with open(os.path.join(svc_dir, "cross_reference.json"), "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    return len(mappings)
+
+
+# ----------------------------------------------------------------------------
+# 主流程
+# ----------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description="Code Diff Analyzer · Bug 关联固化脚本")
+    ap.add_argument("--xlsx", required=True, help="TAPD Bug 导出 Excel 路径")
+    ap.add_argument("--service", help="服务名（缺省时自动探测）")
+    ap.add_argument("--workspace", default=r"d:/workbuddy/测试日常", help="工作区根目录")
+    ap.add_argument("--analytics-root", help="覆盖 diff-analytics 根目录")
+    args = ap.parse_args()
+
+    analytics_root = args.analytics_root or os.path.join(args.workspace, ".workbuddy", "diff-analytics")
+    if not os.path.isfile(args.xlsx):
+        sys.stderr.write(f"[ERROR] xlsx 不存在: {args.xlsx}\n")
+        sys.exit(1)
+
+    headers, bugs = parse_xlsx(args.xlsx)
+    if not bugs:
+        sys.stderr.write("[ERROR] 未解析到任何 bug 记录，请检查 sheet 名/列名\n")
+        sys.exit(1)
+
+    # 服务判定
+    service = args.service
+    if not service:
+        bug_versions = [b["found_in_version"] for b in bugs if b["found_in_version"]] + \
+                       [b["fixed_in_version"] for b in bugs if b["fixed_in_version"]]
+        service = detect_service(analytics_root, bug_versions)
+        if not service:
+            sys.stderr.write("[ERROR] 无法自动探测服务，请用 --service 指定\n")
+            sys.exit(1)
+        print(f"[INFO] 自动探测服务: {service}")
+
+    svc_dir = os.path.join(analytics_root, service)
+    os.makedirs(svc_dir, exist_ok=True)
+
+    # 全量覆写 version_bugs.json（xlsx 为权威来源）
+    version_bugs = {
+        "service": service,
+        "schema_version": "1.0",
+        "source_xlsx": os.path.basename(args.xlsx),
+        "imported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "bugs": bugs,
+    }
+    with open(os.path.join(svc_dir, "version_bugs.json"), "w", encoding="utf-8") as f:
+        json.dump(version_bugs, f, ensure_ascii=False, indent=2)
+
+    # 映射引擎
+    n_map = run_mapping_engine(service, analytics_root, bugs)
+
+    # 摘要
+    closed = sum(1 for b in bugs if b["status"] == "closed")
+    sev_counts = {}
+    for b in bugs:
+        sev_counts[b["severity"]] = sev_counts.get(b["severity"], 0) + 1
+    print("=" * 56)
+    print(f"服务            : {service}")
+    print(f"Bug 总数        : {len(bugs)}")
+    print(f"已关闭/解决     : {closed}  (open={len(bugs)-closed})")
+    print(f"严重度分布      : {sev_counts}")
+    print(f"version_bugs    : 已全量覆写 ({len(bugs)} 条)")
+    print(f"cross_reference : 已全量重建 ({n_map} 条映射)")
+    print(f"落盘目录        : {svc_dir}")
+    print("=" * 56)
+
+
+if __name__ == "__main__":
+    main()

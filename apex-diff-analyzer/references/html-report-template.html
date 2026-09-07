@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{REPORT_TITLE}}</title>
+    <style>
+        /* ========== CSS Variables ========== */
+        :root {
+            --primary: #1a73e8;
+            --primary-light: #e8f0fe;
+            --danger: #d93025;
+            --danger-light: #fce8e6;
+            --warning: #f9ab00;
+            --warning-light: #fef7e0;
+            --success: #188038;
+            --success-light: #e6f4ea;
+            --info: #7b1fa2;
+            --info-light: #f3e8fd;
+            --gray-50: #f8f9fa;
+            --gray-100: #f1f3f4;
+            --gray-200: #e8eaed;
+            --gray-600: #5f6368;
+            --gray-800: #3c4043;
+            --gray-900: #202124;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans SC', sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-900);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 20px 60px;
+        }
+
+        /* ========== Header ========== */
+        .header {
+            background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
+            color: white;
+            padding: 40px 32px;
+            border-radius: 16px;
+            margin-bottom: 32px;
+            box-shadow: 0 4px 20px rgba(26, 115, 232, 0.3);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .header .subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+
+        .header .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .header .meta-item {
+            background: rgba(255,255,255,0.15);
+            border-radius: 8px;
+            padding: 12px 16px;
+        }
+
+        .header .meta-item .label {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 2px;
+        }
+
+        .header .meta-item .value {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* ========== Risk Banner ========== */
+        .risk-banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 32px;
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .risk-banner.high { background: var(--danger-light); color: var(--danger); border: 1px solid #f5c6cb; }
+        .risk-banner.medium { background: var(--warning-light); color: #e37400; border: 1px solid #ffe0b2; }
+        .risk-banner.low { background: var(--success-light); color: var(--success); border: 1px solid #c8e6c9; }
+
+        .risk-banner .risk-icon { font-size: 28px; line-height: 1; }
+        .risk-banner .risk-text strong { font-size: 18px; }
+        .risk-banner .risk-text p { font-weight: 400; font-size: 14px; margin-top: 4px; }
+
+        /* ========== Section ========== */
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            border: 1px solid var(--gray-200);
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--gray-900);
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title .icon { font-size: 22px; }
+
+        /* ========== Table ========== */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 12px 14px;
+            text-align: left;
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        th {
+            background: var(--gray-50);
+            font-weight: 600;
+            color: var(--gray-800);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        tr:hover { background: var(--gray-50); }
+
+        /* ========== Badges ========== */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge-modified { background: var(--primary-light); color: var(--primary); }
+        .badge-new { background: var(--info-light); color: var(--info); }
+        .badge-deleted { background: var(--danger-light); color: var(--danger); }
+        .badge-p0 { background: var(--danger-light); color: var(--danger); }
+        .badge-p1 { background: var(--warning-light); color: #e37400; }
+        .badge-p2 { background: var(--gray-100); color: var(--gray-600); }
+        .badge-high { background: var(--danger-light); color: var(--danger); }
+        .badge-medium { background: var(--warning-light); color: #e37400; }
+        .badge-low { background: var(--success-light); color: var(--success); }
+
+        /* ========== Code Block ========== */
+        .code-block {
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 10px;
+            padding: 20px;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.7;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        .code-block .added { color: #a6e3a1; }
+        .code-block .removed { color: #f38ba8; }
+        .code-block .context { color: #6c7086; }
+        .code-block .file-header { color: #89b4fa; font-weight: 600; }
+
+        /* ========== JSON Analysis Card ========== */
+        .json-card {
+            background: var(--gray-50);
+            border-radius: 10px;
+            padding: 20px 24px;
+            margin-bottom: 16px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .json-card.modified { border-left-color: var(--danger); }
+        .json-card.added { border-left-color: var(--success); }
+        .json-card.info { border-left-color: var(--info); }
+
+        .json-card .card-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--gray-900);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .json-card .field { margin-bottom: 8px; }
+
+        .json-card .field-label {
+            font-size: 12px;
+            color: var(--gray-600);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .json-card .field-value {
+            font-size: 14px;
+            color: var(--gray-900);
+            margin-top: 2px;
+        }
+
+        .json-card .field-value ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .json-card .field-value li {
+            padding: 4px 0 4px 18px;
+            position: relative;
+        }
+
+        .json-card .field-value li::before {
+            content: '\2022';
+            position: absolute;
+            left: 0;
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .json-card .field-value li.warning::before { color: var(--warning); }
+
+        .json-card .diff-pair {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin: 8px 0;
+        }
+
+        .json-card .diff-pair .before {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #c53030;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .json-card .diff-pair .after {
+            background: #f0fff4;
+            border: 1px solid #c6f6d5;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #276749;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .json-card .compat-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .compat-tag.compat { background: var(--success-light); color: var(--success); }
+        .compat-tag.incompat { background: var(--danger-light); color: var(--danger); }
+        .compat-tag.unknown { background: var(--warning-light); color: #e37400; }
+
+        /* ========== Diff Table ========== */
+        .diff-table th, .diff-table td { font-size: 13px; padding: 10px 12px; }
+        .diff-table .highlight-row { background: #fff8e1; }
+        .diff-table .new-row { background: var(--success-light); }
+
+        /* ========== Suggestion Card ========== */
+        .suggestion-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px 24px;
+            margin-bottom: 12px;
+            border: 1px solid var(--gray-200);
+            display: flex;
+            gap: 16px;
+        }
+
+        .suggestion-card .level-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .suggestion-card .level-icon.danger { color: var(--danger); }
+        .suggestion-card .level-icon.warning { color: var(--warning); }
+        .suggestion-card .level-icon.success { color: var(--success); }
+        .suggestion-card .level-icon.info { color: var(--primary); }
+
+        .suggestion-card .content h4 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .suggestion-card .content p {
+            font-size: 14px;
+            color: var(--gray-600);
+            line-height: 1.7;
+        }
+
+        /* ========== Apex Quant Risk Section (增强) ========== */
+        .quant-risk-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 24px;
+            color: white;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+        }
+
+        .quant-risk-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .quant-risk-title {
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .score-display {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .score-circle {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 28px;
+            border: 4px solid rgba(255,255,255,0.3);
+        }
+
+        .score-circle.high { background: rgba(217, 48, 37, 0.8); }
+        .score-circle.medium { background: rgba(249, 171, 0, 0.8); }
+        .score-circle.low { background: rgba(24, 128, 56, 0.8); }
+
+        .score-circle .label {
+            font-size: 11px;
+            opacity: 0.9;
+            font-weight: 400;
+        }
+
+        .score-circle .level {
+            font-size: 14px;
+            margin-top: 2px;
+        }
+
+        .dimension-scores {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .dimension-item {
+            background: rgba(255,255,255,0.15);
+            border-radius: 10px;
+            padding: 14px 16px;
+            backdrop-filter: blur(10px);
+        }
+
+        .dimension-item .dim-name {
+            font-size: 12px;
+            opacity: 0.85;
+            margin-bottom: 6px;
+        }
+
+        .dimension-item .dim-score {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .dimension-item .dim-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .dimension-item .dim-bar-fill {
+            height: 100%;
+            background: white;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        .jit-insight {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-top: 16px;
+        }
+
+        .jit-insight .jit-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .jit-insight .jit-content {
+            font-size: 13px;
+            opacity: 0.9;
+            line-height: 1.6;
+        }
+
+        .jit-insight .jit-ref {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        /* ========== Footer ========== */
+        .footer {
+            text-align: center;
+            color: var(--gray-600);
+            font-size: 13px;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid var(--gray-200);
+        }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 768px) {
+            .container { padding: 12px; }
+            .header { padding: 24px 20px; }
+            .header h1 { font-size: 22px; }
+            .section { padding: 20px 16px; }
+            .header .meta-grid { grid-template-columns: 1fr; }
+            .json-card .diff-pair { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+    <!-- ===== Header ===== -->
+    <div class="header">
+        <h1>{{HEADER_TITLE}}</h1>
+        <p class="subtitle">{{HEADER_SUBTITLE}}</p>
+        <div class="meta-grid">
+            <!--
+            每个信息项使用：
+            <div class="meta-item">
+                <div class="label">标签</div>
+                <div class="value">值</div>
+            </div>
+            -->
+            {{META_ITEMS}}
+        </div>
+    </div>
+
+    <!-- ===== Apex Quant Risk Banner (增强功能) ===== -->
+    <!--
+    {{QUANT_RISK_ENABLED}} - 1表示启用，0表示禁用
+    {{QUANT_SCORE}} - 百分制分数
+    {{QUANT_LEVEL}} - high/medium/low
+    {{QUANT_LEVEL_TEXT}} - 中文等级文字
+    {{QUANT_DIM_BASE}} - 基础风险得分
+    {{QUANT_DIM_SIZE}} - 变更规模得分
+    {{QUANT_DIM_SPAN}} - 模块跨度得分
+    {{QUANT_DIM_CORE}} - 核心模块得分
+    {{QUANT_DIM_DENSITY}} - 变更密度得分
+    {{JIT_PREDICTION}} - JIT预测标签
+    {{JIT_INDICATORS}} - 风险指标列表
+    {{JIT_RECOMMENDATION}} - 建议
+    -->
+    {{#if QUANT_RISK_ENABLED}}
+    <div class="quant-risk-section">
+        <div class="quant-risk-header">
+            <div class="quant-risk-title">
+                <span>⭐</span>
+                <span>量化风险评分</span>
+            </div>
+            <div class="score-display">
+                <div class="score-circle {{QUANT_LEVEL}}">
+                    <span class="label">综合评分</span>
+                    <span>{{QUANT_SCORE}}</span>
+                    <span class="level">{{QUANT_LEVEL_TEXT}}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="dimension-scores">
+            <div class="dimension-item">
+                <div class="dim-name">基础风险 (20%)</div>
+                <div class="dim-score">{{QUANT_DIM_BASE}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_BASE_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item">
+                <div class="dim-name">变更规模 (15%)</div>
+                <div class="dim-score">{{QUANT_DIM_SIZE}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_SIZE_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item">
+                <div class="dim-name">模块跨度 (10%)</div>
+                <div class="dim-score">{{QUANT_DIM_SPAN}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_SPAN_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item">
+                <div class="dim-name">核心模块 (20%)</div>
+                <div class="dim-score">{{QUANT_DIM_CORE}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_CORE_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item">
+                <div class="dim-name">变更密度 (5%)</div>
+                <div class="dim-score">{{QUANT_DIM_DENSITY}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_DENSITY_PCT}}%"></div></div>
+            </div>
+            <!-- ⭐ 新增：历史度量维度 (P0改进) -->
+            <div class="dimension-item" style="background: rgba(255,255,255,0.25);">
+                <div class="dim-name">Buggy历史 (15%)</div>
+                <div class="dim-score">{{QUANT_DIM_BUGGY}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_BUGGY_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item" style="background: rgba(255,255,255,0.25);">
+                <div class="dim-name">代码流失 (10%)</div>
+                <div class="dim-score">{{QUANT_DIM_CHURN}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_CHURN_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item" style="background: rgba(255,255,255,0.2);">
+                <div class="dim-name">修改频率 (3%)</div>
+                <div class="dim-score">{{QUANT_DIM_MODFREQ}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_MODFREQ_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item" style="background: rgba(255,255,255,0.2);">
+                <div class="dim-name">作者经验 (1%)</div>
+                <div class="dim-score">{{QUANT_DIM_AUTHOREXP}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_AUTHOREXP_PCT}}%"></div></div>
+            </div>
+            <div class="dimension-item" style="background: rgba(255,255,255,0.2);">
+                <div class="dim-name">距上次修改 (1%)</div>
+                <div class="dim-score">{{QUANT_DIM_DORMANCY}}/5</div>
+                <div class="dim-bar"><div class="dim-bar-fill" style="width: {{QUANT_DIM_DORMANCY_PCT}}%"></div></div>
+            </div>
+        </div>
+
+        <div class="jit-insight">
+            <div class="jit-title">
+                <span>🔮</span>
+                <span>JIT 缺陷预测洞察</span>
+            </div>
+            <div class="jit-content">
+                <strong>{{JIT_PREDICTION}}</strong> —
+                {{JIT_INDICATORS}}
+                <br><br>
+                <strong>建议：</strong>{{JIT_RECOMMENDATION}}
+            </div>
+            <div class="jit-ref">
+                基于 JITLine 研究 (Zhou et al., 2021)，Top-20% 高风险变更可覆盖 75%-88% 真实缺陷
+            </div>
+        </div>
+    </div>
+    {{/if}}
+
+    <!-- ===== 历史度量数据 (P0改进) ===== -->
+    <!--
+    {{HISTORICAL_METRICS_ENABLED}} - 1表示启用，0表示禁用
+    -->
+    {{#if HISTORICAL_METRICS_ENABLED}}
+    <div class="section">
+        <div class="section-title"><span class="icon">📊</span> 历史度量数据（P0 改进）</div>
+        <p style="color: #5f6368; font-size: 14px; margin-bottom: 16px;">
+            ⭐ 基于 Kamei et al. (2013) 研究：历史 Bug 频率是最强缺陷预测因子
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th>文件路径</th>
+                    <th>Buggy History</th>
+                    <th>Code Churn</th>
+                    <th>修改频率</th>
+                    <th>作者经验</th>
+                    <th>距上次修改</th>
+                    <th>历史评分贡献</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!--
+                每行：
+                <tr>
+                    <td><code>文件路径</code></td>
+                    <td>
+                        <div>提交数: X</div>
+                        <div style="color: #d93025; font-size: 12px;">Bug比率: YY%</div>
+                        <div>评分: Z/5</div>
+                    </td>
+                    <td>
+                        <div>流失行数: X</div>
+                        <div style="color: #e37400; font-size: 12px;">流失率: YY行/天</div>
+                        <div>评分: Z/5</div>
+                    </td>
+                    <td>
+                        <div>修改次数: X</div>
+                        <div>评分: Y/5</div>
+                    </td>
+                    <td>
+                        <div>历史提交: X</div>
+                        <div style="color: #188038; font-size: 12px;">成功率: YY%</div>
+                        <div>评分: Z/5</div>
+                    </td>
+                    <td>
+                        <div>XX天前</div>
+                        <div>评分: Y/5</div>
+                    </td>
+                    <td style="font-weight: 600; color: #1a73e8;">
+                        +X.XX分
+                    </td>
+                </tr>
+                -->
+                {{HISTORICAL_METRICS_ROWS}}
+            </tbody>
+        </table>
+        <div style="margin-top: 16px; padding: 12px 16px; background: #e8f0fe; border-radius: 8px; font-size: 13px; color: #1a73e8;">
+            <strong>⭐ 历史度量贡献：</strong>
+            历史 Bug 频率评分 +<strong>{{BUGGY_SCORE_CONTRIBUTION}}</strong> 分，
+            代码流失率评分 +<strong>{{CHURN_SCORE_CONTRIBUTION}}</strong> 分，
+            合计为综合评分贡献 <strong>+{{TOTAL_HISTORICAL_CONTRIBUTION}}</strong> 分
+        </div>
+    </div>
+    {{/if}}
+
+    <!-- ===== Risk Banner ===== -->
+    <!--
+    high / medium / low 三选一
+    -->
+    <div class="risk-banner {{RISK_LEVEL}}">
+        <div class="risk-icon">{{RISK_ICON}}</div>
+        <div class="risk-text">
+            <strong>综合风险等级：{{RISK_TEXT}}</strong>
+            <p>{{RISK_DESCRIPTION}}</p>
+        </div>
+    </div>
+
+    <!-- ===== Section: 变更总览 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">📁</span> 变更总览</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>文件路径</th>
+                    <th>变更类型</th>
+                    <th>变更说明</th>
+                    <th>风险等级</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!--
+                每行：
+                <tr>
+                    <td><code>文件路径</code></td>
+                    <td><span class="badge badge-modified">修改</span></td>
+                    <td>说明</td>
+                    <td><span class="badge badge-low">🟢 低</span></td>
+                </tr>
+                -->
+                {{CHANGE_OVERVIEW_ROWS}}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ===== Section: 代码差异详情 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">🔧</span> 代码差异详情</div>
+        <!--
+        每个文件的 diff 使用：
+        <h4 style="margin: 16px 0 8px;">标题</h4>
+        <div class="code-block">
+            <span class="file-header">--- 旧版本</span>
+            <span class="file-header">+++ 新版本</span>
+            <span class="context">上下文行</span>
+            <span class="removed">- 删除行</span>
+            <span class="added">+ 新增行</span>
+        </div>
+        -->
+        {{CODE_DIFF_DETAILS}}
+    </div>
+
+    <!-- ===== Section: 变更代码影响分析 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">⚡</span> 变更代码影响分析（Modified Code）</div>
+        <!--
+        每个变更点使用：
+        <div class="json-card modified">
+            <div class="card-title">📦 文件路径 — 变更描述</div>
+            <div class="field">
+                <div class="field-label">变更前后对比</div>
+                <div class="diff-pair">
+                    <div class="before">旧代码</div>
+                    <div class="after">新代码</div>
+                </div>
+            </div>
+            <div class="field">
+                <div class="field-label">行为差异</div>
+                <div class="field-value">描述</div>
+            </div>
+            <div class="field">
+                <div class="field-label">向后兼容</div>
+                <div class="field-value">
+                    <span class="compat-tag incompat">不兼容</span> 说明
+                </div>
+            </div>
+            <div class="field">
+                <div class="field-label">直接影响</div>
+                <div class="field-value"><ul><li>影响项</li></ul></div>
+            </div>
+            <div class="field">
+                <div class="field-label">潜在影响</div>
+                <div class="field-value"><ul><li class="warning">影响项（不确定）</li></ul></div>
+            </div>
+            <div class="field">
+                <div class="field-label">风险等级</div>
+                <div class="field-value"><span class="badge badge-high">🔴 高</span></div>
+            </div>
+            <div class="field">
+                <div class="field-label">测试建议</div>
+                <div class="field-value">建议内容</div>
+            </div>
+        </div>
+        -->
+        {{MODIFIED_CODE_ANALYSIS}}
+    </div>
+
+    <!-- ===== Section: 新增代码影响分析 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">🆕</span> 新增代码影响分析（Added Code）</div>
+        <!--
+        每个新增点使用：
+        <div class="json-card added">
+            <div class="card-title">📦 文件路径 — 新增内容描述</div>
+            <div class="field">
+                <div class="field-label">业务场景</div>
+                <div class="field-value">场景描述</div>
+            </div>
+            <div class="field">
+                <div class="field-label">集成点</div>
+                <div class="field-value">与XX模块集成</div>
+            </div>
+            <div class="field">
+                <div class="field-label">边界条件</div>
+                <div class="field-value"><ul><li>条件1</li><li>条件2</li></ul></div>
+            </div>
+            <div class="field">
+                <div class="field-label">直接影响</div>
+                <div class="field-value"><ul><li>影响项</li></ul></div>
+            </div>
+            <div class="field">
+                <div class="field-label">风险等级</div>
+                <div class="field-value"><span class="badge badge-low">🟢 低</span></div>
+            </div>
+            <div class="field">
+                <div class="field-label">测试建议</div>
+                <div class="field-value">建议内容</div>
+            </div>
+        </div>
+        -->
+        {{ADDED_CODE_ANALYSIS}}
+    </div>
+
+    <!-- ===== Section: 数据格式变更详解（可选，仅当有数据格式变更时） ===== -->
+    <!--
+    <div class="section">
+        <div class="section-title"><span class="icon">📊</span> 数据格式变更详解</div>
+        <table class="diff-table">
+            <thead>
+                <tr><th>序号</th><th>旧格式</th><th>新格式</th><th>变化说明</th></tr>
+            </thead>
+            <tbody>
+                <tr class="highlight-row"><td>序号</td><td>旧值</td><td><strong>新值</strong></td><td>⚠️ 说明</td></tr>
+                <tr class="new-row"><td>序号</td><td>—</td><td>新增值</td><td>🆕 新增</td></tr>
+            </tbody>
+        </table>
+    </div>
+    -->
+    {{DATA_FORMAT_SECTION}}
+
+    <!-- ===== Section: 测试建议 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">🧪</span> 测试建议</div>
+        <table>
+            <thead>
+                <tr><th>优先级</th><th>测试场景</th><th>测试要点</th><th>预期结果</th></tr>
+            </thead>
+            <tbody>
+                <!--
+                每行：
+                <tr>
+                    <td><span class="badge badge-p0">P1 必测</span></td>
+                    <td>场景名</td>
+                    <td>要点</td>
+                    <td>预期</td>
+                </tr>
+                -->
+                {{TEST_SUGGESTION_ROWS}}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ===== Section: 开发者建议 ===== -->
+    <div class="section">
+        <div class="section-title"><span class="icon">💡</span> 开发者建议</div>
+        <!--
+        每条建议：
+        <div class="suggestion-card">
+            <div class="level-icon danger">🔴</div>
+            <div class="content">
+                <h4>标题</h4>
+                <p>说明</p>
+            </div>
+        </div>
+        -->
+        {{DEVELOPER_SUGGESTIONS}}
+    </div>
+
+    <!-- ===== Section: 优化方向（可选） ===== -->
+    <!--
+    <div class="section">
+        <div class="section-title"><span class="icon">🚀</span> 优化方向</div>
+        <div class="suggestion-card">
+            <div class="level-icon info">1️⃣</div>
+            <div class="content">
+                <h4>标题</h4>
+                <p>说明</p>
+            </div>
+        </div>
+    </div>
+    -->
+    {{OPTIMIZATION_SECTION}}
+
+    <!-- ===== Footer ===== -->
+    <div class="footer">
+        <p>本报告由 <strong>Apex Diff Analyzer</strong> 自动生成 · 集成量化风险评分模型 ⭐</p>
+        <p style="margin-top: 4px;">{{FOOTER_INFO}}</p>
+        <p style="margin-top: 8px; font-size: 11px; opacity: 0.7;">
+            风险评估依据：Kamei et al. (2013) · Zhou et al. (2021) JITLine · CHID (ESE 2024)
+        </p>
+    </div>
+
+</div>
+
+</body>
+</html>
