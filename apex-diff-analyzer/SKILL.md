@@ -1,5 +1,9 @@
 ---
 name: apex-diff-analyzer
+display_name: 巅峰代码变更影响分析
+display_name_en: Apex Diff Analyzer
+version: 1.0.0
+author: Chane
 description: >
   Apex Diff Analyzer — 巅峰代码变更影响分析技能。
 
@@ -14,6 +18,8 @@ description: >
 
   支持两种输入格式：①CI/CD原始输出（tagdiff.txt）②结构化Markdown报告（compare_vX_to_Y.md）。
   支持区分「新增代码」和「变更代码」两类变更进行分别分析。
+description_zh: 巅峰代码变更影响分析技能：在基础版之上集成量化风险评分（0-100分）、JIT 缺陷预测洞察与学术数据支撑。分析 git diff、评估 PR 影响范围、制定回归测试计划、量化风险评估时使用。
+description_en: Apex code diff analyzer with quantitative risk scoring (0-100), JIT defect prediction insights and academic data support. Use for git diff analysis, PR impact assessment, regression test planning and quantified risk evaluation.
 ---
 
 # Apex Diff Analyzer — 巅峰代码变更影响分析

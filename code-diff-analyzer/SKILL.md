@@ -1,5 +1,9 @@
 ---
 name: code-diff-analyzer
+display_name: 代码变更影响分析
+display_name_en: Code Diff Analyzer
+version: 1.0.0
+author: Chane
 description: >
   代码变更影响分析技能。当用户提供 Git diff、代码变更记录或版本对比内容，
   需要分析变更影响范围、评估风险等级、规划测试范围时，使用此 Skill。
@@ -7,6 +11,8 @@ description: >
   CI/CD 流水线中的变更分析、tagdiff.txt 分析、compare_vX_to_Y.md 分析等。
   支持两种输入格式：①CI/CD原始输出（tagdiff.txt）②结构化Markdown报告（compare_vX_to_Y.md）。
   支持区分「新增代码」和「变更代码」两类变更进行分别分析，并可自动生成HTML格式的变更报告。
+description_zh: 代码变更影响分析技能：解析 git diff/tagdiff.txt/compare 报告，分类新增与变更代码，分析模块依赖，评估风险等级，输出影响范围、回归测试建议与 HTML 报告。
+description_en: "Code diff impact analysis skill - parse git diff / tagdiff.txt / compare reports, classify added vs modified code, analyze module dependencies, assess risk levels, and produce impact scope, regression test plans and HTML reports."
 ---
 
 # Code Diff Analyzer — 代码变更影响分析
