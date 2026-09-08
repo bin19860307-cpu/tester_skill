@@ -2,7 +2,7 @@
 name: web-test-case-generator
 display_name: Chane · 网页测试用例生成器
 display_name_en: Web Test Case Generator
-version: 1.0.0
+version: 1.0.1
 author: Chane
 description: 根据提供的网站页面自动生成测试用例。支持 UI 测试、功能测试、流程测试、异常测试、权限测试和兼容性测试。输出格式支持 Markdown 表格和 CSV。
 description_zh: "根据提供的网站页面自动生成测试用例，覆盖 UI、功能、流程、异常、权限与兼容性测试，输出 Markdown 表格或 CSV。"

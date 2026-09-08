@@ -2,7 +2,7 @@
 name: code-diff-analyzer
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
-version: 1.0.0
+version: 1.0.1
 author: Chane
 description: >
   代码变更影响分析技能。当用户提供 Git diff、代码变更记录或版本对比内容，

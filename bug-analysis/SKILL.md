@@ -3,7 +3,7 @@ name: bug-analysis
 display_name: Chane · Bug列表多维分析
 display_name_en: Bug List Analyzer
 author: Chane
-version: 1.0.0
+version: 1.0.1
 agent_created: true
 description: >
   对 TAPD / 禅道 / 云效等缺陷管理系统导出的 Bug 列表 Excel 做多维量化分析，输出可直接用于

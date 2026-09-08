@@ -1,6 +1,6 @@
 name: excel-testcase-18col
 display_name: Chane · 企业18列测试用例生成器
-version: 1.0.0
+version: 1.0.1
 author: chenb
 category: 测试效能
 description: "生成符合企业18列标准格式的测试用例Excel文件（参考班级管理测试用例_v2.xlsx模板）。 触发词：18列格式、企业模板、用例Excel、生成测试用例Excel、班级管理模板、按套件生成用例。 进阶能力：基线驱动（文案/链接抽单一数据源）+ 步骤与预期 1:1 编号配对（含 \"-\" 无需验证标记）+ 三表输出（测试用例/文案基线/链接基线）。"

@@ -1,6 +1,6 @@
 name: apex-diff-analyzer
 display_name: Chane · 巅峰代码变更影响分析
-version: 1.0.0
+version: 1.0.1
 author: Chane
 category: 开发效率
 description: "Apex Diff Analyzer — 巅峰代码变更影响分析技能。 在 code-diff-analyzer 基础上深度增强，集成量化风险评分模型（Phase 1）、JIT 缺陷预测洞察（Phase 2）和学术数据深度支撑（Phase 3）。 核心增强： - Phase 1 量化风险评分：基于 CHID 实践模型的 5 维度综合评分（0-100 分） - Phase 2 JIT 预测洞察：基于 CC2Vec/JITLine 研究的预测性分析 - Phase 3 学术数据支撑：Kamei et al. (2013)、Zhou et al. (2021)、SZZ基准数据等权威研究 触发场景：分析 git diff、评估 PR 影响范围、制定回归测试计划、CI/CD 变更分析、量化风险评估。 支持两种输入格式：①CI/CD原始输出（tagdiff.txt）②结构化Markdown报告（compare_vX_to_Y.md）。 支持区分「新增代码」和「变更代码」两类变更进行分别分析。"

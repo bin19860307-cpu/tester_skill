@@ -2,7 +2,7 @@
 name: apex-diff-analyzer
 display_name: Chane · 巅峰代码变更影响分析
 display_name_en: Apex Diff Analyzer
-version: 1.0.0
+version: 1.0.1
 author: Chane
 description: >
   Apex Diff Analyzer — 巅峰代码变更影响分析技能。
