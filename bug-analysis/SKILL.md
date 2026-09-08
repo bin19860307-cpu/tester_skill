@@ -1,6 +1,6 @@
 ---
 name: bug-analysis
-display_name: Bug列表多维分析
+display_name: Chane · Bug列表多维分析
 display_name_en: Bug List Analyzer
 author: Chane
 version: 1.0.0

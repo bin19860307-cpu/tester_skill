@@ -1,6 +1,6 @@
 ---
 name: web-test-case-generator
-display_name: 网页测试用例生成器
+display_name: Chane · 网页测试用例生成器
 display_name_en: Web Test Case Generator
 version: 1.0.0
 author: Chane

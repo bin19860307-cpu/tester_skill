@@ -1,6 +1,6 @@
 ---
 name: code-diff-analyzer
-display_name: 代码变更影响分析
+display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
 version: 1.0.0
 author: Chane

@@ -1,6 +1,6 @@
 ---
 name: excel-testcase-18col
-display_name: 企业18列测试用例生成器
+display_name: Chane · 企业18列测试用例生成器
 display_name_en: Excel Testcase 18 Columns
 author: Chane
 version: 2.0.0
