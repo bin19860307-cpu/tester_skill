@@ -1,0 +1,21 @@
+name: bug-analysis
+display_name: bug-analysis
+version: 1.0.0
+author: chenb
+category: 测试效能
+description: "对 TAPD / 禅道 / 云效等缺陷管理系统导出的 Bug 列表 Excel 做多维量化分析，输出可直接用于 测试报告「Bug 分析」章节的文字版素材。 触发词：bug分析、缺陷分析、bug列表分析、测试报告bug章节、缺陷分布、返工率、修复周期、 一次解决率、严重程度占比、模块缺陷分布。"
+triggers:
+  - 分析 git diff
+  - 评估 PR 影响范围
+  - 制定回归测试计划
+  - tagdiff.txt 分析
+  - compare_vX_to_Y.md 分析
+  - 生成变更报告
+tags:
+  - code-review
+  - diff
+  - risk-analysis
+  - testing
+  - ci-cd
+  - agent-skill
+license: MIT
