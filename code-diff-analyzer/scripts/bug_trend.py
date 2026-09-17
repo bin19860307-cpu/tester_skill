@@ -18,13 +18,16 @@ bug_trend.py  —  Code Diff Analyzer · Flow C.2 版本 Bug 趋势统计（固�
      样式使用 bt- 前缀作用域，避免与比对报告模板的全局样式冲突。
 
 用法：
-  # 独立报告
+  # 单服务报告（默认）
   python bug_trend.py --service portal-backend
-  python bug_trend.py --service portal-backend --out "report/.../xxx_bug趋势.html"
-
-  # 注入到当次生成的比对分析报告（推荐：每次分析自动追加）
   python bug_trend.py --service portal-backend \
         --report "report/code-diff/portal-backend/portal-backend_xxx_变更影响分析报告.html"
+
+  # 综合报告（跨服务聚合注入，与 --service 互斥）
+  #   先由 gen_combined_report.py 在「各版本 Bug 数据明细」节写入 <!-- BUG_TREND_COMBINED --> 占位符，
+  #   再由本命令聚合各服务 version_bugs.json 并替换该占位符。
+  python bug_trend.py --combined --services portal-backend main-frontend manage-frontend \
+        --report "report/code-diff/_综合/综合比对分析报告_xxx.html"
 
 依赖：仅 Python 标准库
 """
@@ -90,7 +93,8 @@ def build_stats(service, analytics_root):
         sev = {s: 0 for s in SEV_ORDER}
         for b in found:
             sev[b.get("severity", "medium")] = sev.get(b.get("severity", "medium"), 0) + 1
-        closed = sum(1 for b in found if b.get("status") == "closed")
+        # 已关闭 / 已解决 均视为「已处理」，计入修复率分母
+        done = sum(1 for b in found if b.get("status") in ("closed", "resolved"))
         rec = metrics_map.get(v)
         files_changed = rec.get("metrics", {}).get("files_changed") if rec else None
         per_version.append({
@@ -98,8 +102,8 @@ def build_stats(service, analytics_root):
             "found": len(found),
             "fixed": len(fixed),
             "sev": sev,
-            "closed_among_found": closed,
-            "fix_rate": round(closed / len(found), 3) if found else None,
+            "closed_among_found": done,
+            "fix_rate": round(done / len(found), 3) if found else None,
             "files_changed": files_changed,
             "change_to_bug_ratio": round(len(found) / files_changed, 4) if files_changed else None,
         })
@@ -114,6 +118,8 @@ def build_stats(service, analytics_root):
 
     total = len(bugs)
     closed_total = sum(1 for b in bugs if b.get("status") == "closed")
+    resolved_total = sum(1 for b in bugs if b.get("status") == "resolved")
+    done_total = closed_total + resolved_total
     sev_total = {s: 0 for s in SEV_ORDER}
     for b in bugs:
         sev_total[b.get("severity", "medium")] = sev_total.get(b.get("severity", "medium"), 0) + 1
@@ -124,12 +130,117 @@ def build_stats(service, analytics_root):
         "per_version": per_version,
         "total": total,
         "closed_total": closed_total,
-        "fix_rate_total": round(closed_total / total, 3) if total else None,
+        "resolved_total": resolved_total,
+        "done_total": done_total,
+        "fix_rate_total": round(done_total / total, 3) if total else None,
         "sev_total": sev_total,
         "avg_fix_interval": avg_interval,
         "versions_count": len(ordered),
         "source_bugs": bugs_doc.get("source_xlsx"),
     }
+
+
+# ----------------------------------------------------------------------------
+# 综合模式：跨服务聚合版本 Bug 趋势
+# ----------------------------------------------------------------------------
+def build_stats_combined(services, analytics_root):
+    """跨服务聚合版本 Bug 趋势（综合报告用）。
+
+    仅聚合各服务 version_bugs.json 中实际存在的 Bug；
+    某服务无 version_bugs.json 时其贡献为 0（不影响其它服务）。
+    返回结构与 build_stats 一致（per_version / total / closed_total /
+    resolved_total / done_total / sev_total / fix_rate_total ...），
+    供 svg_stacked_bar / render_inner / render_combined_section 复用。
+    """
+    all_bugs = []
+    sources = []
+    for svc in services:
+        svc_dir = os.path.join(analytics_root, svc)
+        bugs_doc = load_json(os.path.join(svc_dir, "version_bugs.json"))
+        if bugs_doc and bugs_doc.get("bugs"):
+            all_bugs.extend(bugs_doc["bugs"])
+            sources.append(bugs_doc.get("source_xlsx") or svc)
+    if not all_bugs:
+        return None
+
+    # 版本全集（跨服务 found + fixed 并集）
+    all_versions = set()
+    for b in all_bugs:
+        if b.get("found_in_version"):
+            all_versions.add(b["found_in_version"])
+        if b.get("fixed_in_version"):
+            all_versions.add(b["fixed_in_version"])
+    ordered = sorted(all_versions, key=version_key)
+    idx = {v: i for i, v in enumerate(ordered)}
+
+    per_version = []
+    for v in ordered:
+        found = [b for b in all_bugs if b.get("found_in_version") == v]
+        fixed = [b for b in all_bugs if b.get("fixed_in_version") == v]
+        sev = {s: 0 for s in SEV_ORDER}
+        for b in found:
+            sev[b.get("severity", "medium")] = sev.get(b.get("severity", "medium"), 0) + 1
+        done = sum(1 for b in found if b.get("status") in ("closed", "resolved"))
+        per_version.append({
+            "version": v,
+            "found": len(found),
+            "fixed": len(fixed),
+            "sev": sev,
+            "closed_among_found": done,
+            "fix_rate": round(done / len(found), 3) if found else None,
+            "files_changed": None,
+            "change_to_bug_ratio": None,
+        })
+
+    intervals = []
+    for b in all_bugs:
+        fv, fxv = b.get("found_in_version"), b.get("fixed_in_version")
+        if fv in idx and fxv in idx:
+            intervals.append(abs(idx[fxv] - idx[fv]))
+    avg_interval = round(sum(intervals) / len(intervals), 2) if intervals else None
+
+    total = len(all_bugs)
+    closed_total = sum(1 for b in all_bugs if b.get("status") == "closed")
+    resolved_total = sum(1 for b in all_bugs if b.get("status") == "resolved")
+    done_total = closed_total + resolved_total
+    sev_total = {s: 0 for s in SEV_ORDER}
+    for b in all_bugs:
+        sev_total[b.get("severity", "medium")] = sev_total.get(b.get("severity", "medium"), 0) + 1
+
+    return {
+        "service": "综合（" + " + ".join(services) + "）",
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "per_version": per_version,
+        "total": total,
+        "closed_total": closed_total,
+        "resolved_total": resolved_total,
+        "done_total": done_total,
+        "fix_rate_total": round(done_total / total, 3) if total else None,
+        "sev_total": sev_total,
+        "avg_fix_interval": avg_interval,
+        "versions_count": len(ordered),
+        "source_bugs": "、".join(sources) if sources else "version_bugs.json",
+        "services": services,
+    }
+
+
+def render_combined_section(stats):
+    """综合报告注入用：不包外层 .section（由综合报告「各版本 Bug 数据明细」节包裹），
+    仅返回 标题 + bt-wrap 内容 + 作用域样式，供 embed_combined_into_report 替换占位符。
+    """
+    inner = render_inner(stats)
+    svc_note = (
+        f'<p class="bt-note">＊综合跨服务汇总：参与服务 {len(stats.get("services", []))} 个，'
+        f'仅含各自 version_bugs.json 中已关联的 Bug（未关联 Bug 列表的服务贡献为 0）。'
+        f'本轮仅 portal-backend 关联 Bug 列表，故柱状图反映其 {stats["total"]} 条 Bug 的跨版本分布。</p>'
+    )
+    return (
+        f"{SECTION_STYLE}\n"
+        f'<div style="margin:10px 0 4px">\n'
+        f'  <div class="bt-section-title"><span>📈</span> 版本 Bug 趋势分析（综合跨服务累计）</div>\n'
+        f'  <div class="bt-wrap">{inner}{svc_note}</div>\n'
+        f"</div>"
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -243,7 +354,7 @@ def render_inner(stats):
         )
     table = (
         '<table class="bt-table"><thead><tr><th>版本</th><th>发现Bug</th><th>修复Bug</th>'
-        "<th>严重度(严/高/中/低)</th><th>已关闭</th><th>修复率</th><th>变更文件数</th><th>Bug/变更比</th></tr></thead>"
+        "<th>严重度(严/高/中/低)</th><th>已关闭/解决</th><th>修复率</th><th>变更文件数</th><th>Bug/变更比</th></tr></thead>"
         "<tbody>" + "".join(rows) + "</tbody></table>"
     )
 
@@ -251,7 +362,7 @@ def render_inner(stats):
     inner = f"""
 <div class="bt-cards">
   <div class="bt-card"><div class="bt-num">{stats['total']}</div><div class="bt-lbl">Bug 总数</div></div>
-  <div class="bt-card"><div class="bt-num" style="color:#27ae60">{stats['closed_total']}</div><div class="bt-lbl">已关闭/解决</div></div>
+  <div class="bt-card"><div class="bt-num" style="color:#27ae60">{stats['closed_total']}<span style="font-size:15px;color:#888"> / {stats['resolved_total']}</span></div><div class="bt-lbl">已关闭 / 已解决</div></div>
   <div class="bt-card"><div class="bt-num" style="color:#e67e22">{stats['fix_rate_total']*100:.0f}%</div><div class="bt-lbl">整体修复率</div></div>
   <div class="bt-card"><div class="bt-num">{avg_interval if avg_interval is not None else '—'}</div><div class="bt-lbl">平均修复版本间隔</div></div>
 </div>
@@ -261,14 +372,14 @@ def render_inner(stats):
   {svg_stacked_bar(stats)}
 </div>
 <div class="bt-panel">
-  <div class="bt-panel-title">② 各版本修复率（发现版本内已关闭占比）</div>
+  <div class="bt-panel-title">② 各版本修复率（发现版本内已关闭/已解决占比）</div>
   {svg_fix_rate_bar(stats)}
 </div>
 <div class="bt-panel">
   <div class="bt-panel-title">③ 版本维度明细</div>
   {table}
 </div>
-<p class="bt-note">＊本区块由 code-diff-analyzer/scripts/bug_trend.py 生成，单文件无外部依赖。修复率=该版本发现的 Bug 中状态为已关闭/已解决的比例；Bug/变更比=发现 Bug 数 ÷ 该版本变更文件数（数据缺失时显示 —）。数据源：{stats['source_bugs'] or 'version_bugs.json'} ｜ 覆盖版本数：{stats['versions_count']} ｜ 生成时间：{stats['generated_at']}</p>
+<p class="bt-note">＊本区块由 code-diff-analyzer/scripts/bug_trend.py 生成，单文件无外部依赖。修复率=该版本发现的 Bug 中状态为已关闭或已解决的比例；综合报告中「已关闭 / 已解决」取各服务 version_bugs.json 汇总（无关联 Bug 的服务贡献为 0）。数据源：{stats['source_bugs'] or 'version_bugs.json'} ｜ 覆盖版本数：{stats['versions_count']} ｜ 生成时间：{stats['generated_at']}</p>
 """
     return inner
 
@@ -339,13 +450,50 @@ def embed_into_report(section_html, report_path):
     return mode
 
 
+# 综合模式占位符 / 幂等块标记（由 gen_combined_report.py 在「各版本 Bug 数据明细」节写入占位符）
+PLACEHOLDER_COMBINED = "<!-- BUG_TREND_COMBINED -->"
+START_MARK_COMBINED = "<!-- BUG_TREND_COMBINED_START -->"
+END_MARK_COMBINED = "<!-- BUG_TREND_COMBINED_END -->"
+
+
+def embed_combined_into_report(section_html, report_path):
+    if not os.path.isfile(report_path):
+        raise SystemExit(f"[ERROR] 综合比对报告不存在: {report_path}")
+    with open(report_path, encoding="utf-8") as f:
+        html = f.read()
+
+    wrapped = f"{START_MARK_COMBINED}\n{section_html}\n{END_MARK_COMBINED}"
+
+    if PLACEHOLDER_COMBINED in html:
+        html = html.replace(PLACEHOLDER_COMBINED, wrapped, 1)
+        mode = "占位符替换"
+    elif START_MARK_COMBINED in html:
+        html = re.sub(re.escape(START_MARK_COMBINED) + r".*?" + re.escape(END_MARK_COMBINED),
+                      wrapped, html, flags=re.DOTALL)
+        mode = "整块替换(幂等)"
+    else:
+        # fallback：注入到 </body> 之前
+        if "</body>" in html:
+            html = html.replace("</body>", wrapped + "\n</body>", 1)
+        else:
+            html = html + "\n" + wrapped
+        mode = "回退注入(</body>前)"
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    return mode
+
+
 # ----------------------------------------------------------------------------
 # 入口
 # ----------------------------------------------------------------------------
 def main():
     import sys
     ap = argparse.ArgumentParser(description="Code Diff Analyzer · 版本 Bug 趋势统计")
-    ap.add_argument("--service", required=True, help="服务名")
+    ap.add_argument("--service", help="服务名（单服务模式，与 --combined 互斥）")
+    ap.add_argument("--combined", action="store_true",
+                    help="综合模式：跨服务聚合注入（需 --services + --report）")
+    ap.add_argument("--services", nargs="+", help="综合模式参与服务列表")
     ap.add_argument("--workspace", default=r"d:/workbuddy/测试日常", help="工作区根目录")
     ap.add_argument("--analytics-root", help="覆盖 diff-analytics 根目录")
     ap.add_argument("--out", help="独立报告输出 HTML 路径（缺省自动生成）")
@@ -353,6 +501,31 @@ def main():
     args = ap.parse_args()
 
     analytics_root = args.analytics_root or os.path.join(args.workspace, ".workbuddy", "diff-analytics")
+
+    # —— 综合模式：跨服务聚合注入 ——
+    if args.combined:
+        if not args.services:
+            sys.stderr.write("[ERROR] 综合模式需 --services 指定参与服务\n")
+            raise SystemExit(1)
+        if not args.report:
+            sys.stderr.write("[ERROR] 综合模式需 --report 指定综合报告 HTML\n")
+            raise SystemExit(1)
+        stats = build_stats_combined(args.services, analytics_root)
+        if not stats:
+            sys.stderr.write("[ERROR] 所有参与服务均无 version_bugs.json（无关联 Bug），跳过综合注入\n")
+            raise SystemExit(1)
+        section = render_combined_section(stats)
+        mode = embed_combined_into_report(section, args.report)
+        print(f"[OK] 综合趋势区块已{mode}注入: {args.report}")
+        print(f"     聚合服务={len(args.services)} Bug 总数={stats['total']} "
+              f"已关闭={stats['closed_total']} 已解决={stats['resolved_total']} "
+              f"修复率={stats['fix_rate_total']*100:.0f}% 覆盖版本={stats['versions_count']}")
+        return
+
+    # —— 单服务模式 ——
+    if not args.service:
+        sys.stderr.write("[ERROR] 请指定 --service（单服务）或 --combined --services（综合）\n")
+        raise SystemExit(1)
     stats = build_stats(args.service, analytics_root)
     if not stats:
         sys.stderr.write("[ERROR] 未找到该服务的 version_bugs.json 或为空，请先运行 bug_correlate.py 导入 Bug 数据\n")
@@ -362,7 +535,8 @@ def main():
         section = render_embed_html(stats)
         mode = embed_into_report(section, args.report)
         print(f"[OK] 趋势区块已{mode}注入: {args.report}")
-        print(f"     Bug 总数={stats['total']} 已关闭={stats['closed_total']} 修复率={stats['fix_rate_total']*100:.0f}% 覆盖版本={stats['versions_count']}")
+        print(f"     Bug 总数={stats['total']} 已关闭={stats['closed_total']} 已解决={stats['resolved_total']} "
+              f"修复率={stats['fix_rate_total']*100:.0f}% 覆盖版本={stats['versions_count']}")
         return
 
     out = args.out or os.path.join(
@@ -373,7 +547,8 @@ def main():
     with open(out, "w", encoding="utf-8") as f:
         f.write(render_full_html(stats))
     print(f"[OK] 趋势报告已生成: {out}")
-    print(f"     Bug 总数={stats['total']} 已关闭={stats['closed_total']} 修复率={stats['fix_rate_total']*100:.0f}% 覆盖版本={stats['versions_count']}")
+    print(f"     Bug 总数={stats['total']} 已关闭={stats['closed_total']} 已解决={stats['resolved_total']} "
+          f"修复率={stats['fix_rate_total']*100:.0f}% 覆盖版本={stats['versions_count']}")
 
 
 if __name__ == "__main__":

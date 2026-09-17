@@ -8,11 +8,12 @@ gen_combined_report.py — Code Diff Analyzer · 综合比对分析报告（多�
   再用本脚本把多份分析结果汇总成一份「综合比对分析报告」HTML。
 
 报告结构（已与用户确认：摘要卡 + 跨服务关联，不整篇拼装）：
-  ① 综合总览（服务数 / 版本矩阵 / 版本批次 / 综合风险 / 总变更规模 / 总 Bug 数）
+  ① 综合总览（服务数 / 版本矩阵 / 版本批次 / 综合风险 / 总变更规模 / 总 Bug 数·已关闭·已解决）
   ② 各服务摘要卡（风险 / 变更版本 from→to / 变更规模 / Bug / 专项检测 / 独立报告链接）
   ③ 跨服务关联与级联风险（核心增值，启发式关键词匹配）
   ④ 统一测试优先级（合并各服务 high-risk 模块去重）
-  ⑤ 综合发布建议
+  ⑤ 各版本 Bug 数据明细（仅综合报告含 ≥2 服务时展示；按产生版本 / 解决版本分布）
+  ⑥ 综合发布建议
 
 设计决策（2026-08-10 确认）：
   - 内容深度：摘要卡 + 跨服务关联（不整篇拼装，避免篇幅爆炸）
@@ -152,17 +153,30 @@ def load_service(service, analytics_root, report_root):
                 bug_links.append(bid)
 
     # —— Bug 汇总（来自 version_bugs.json）——
-    bug_summary = {"total": 0, "closed": 0, "open": 0,
+    bug_summary = {"total": 0, "closed": 0, "resolved": 0, "open": 0,
                    "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0}}
     if bugs_doc and bugs_doc.get("bugs"):
         bs = bugs_doc["bugs"]
         bug_summary["total"] = len(bs)
         bug_summary["closed"] = sum(1 for b in bs if b.get("status") == "closed")
-        bug_summary["open"] = bug_summary["total"] - bug_summary["closed"]
+        bug_summary["resolved"] = sum(1 for b in bs if b.get("status") == "resolved")
+        bug_summary["open"] = bug_summary["total"] - bug_summary["closed"] - bug_summary["resolved"]
         for b in bs:
             sv = b.get("severity", "medium")
             if sv in bug_summary["by_severity"]:
                 bug_summary["by_severity"][sv] += 1
+
+    # —— 各版本 Bug 分布（产生版本 / 解决版本），供综合报告「各版本 Bug 数据明细」节 ——
+    bug_version = {"found": {}, "fixed": {}, "severity_by_found": {}}
+    if bugs_doc and bugs_doc.get("bugs"):
+        for b in bugs_doc["bugs"]:
+            fv = b.get("found_in_version") or "(未填)"
+            xv = b.get("fixed_in_version") or "(未填)"
+            bug_version["found"][fv] = bug_version["found"].get(fv, 0) + 1
+            bug_version["fixed"][xv] = bug_version["fixed"].get(xv, 0) + 1
+            sv = b.get("severity_raw") or b.get("severity") or "medium"
+            bug_version["severity_by_found"].setdefault(fv, {})
+            bug_version["severity_by_found"][fv][sv] = bug_version["severity_by_found"][fv].get(sv, 0) + 1
 
     # —— 概念指纹（用于跨服务关联）——
     bug_titles = [b.get("title", "") for b in (bugs_doc.get("bugs") if bugs_doc else [])]
@@ -186,6 +200,7 @@ def load_service(service, analytics_root, report_root):
         "detections": detections,
         "bug_links": bug_links,
         "bug_summary": bug_summary,
+        "bug_version": bug_version,
         "concepts": concepts,
         "module_names": module_names,
         "report_path": report_path,
@@ -239,7 +254,8 @@ def badge(risk):
     return f'<span style="display:inline-block;padding:3px 12px;border-radius:12px;color:#fff;background:{c};font-weight:600;font-size:13px">{RISK_LABEL.get(risk, risk)}风险</span>'
 
 
-def render_service_card(s):
+def render_service_card(s, absolute=False):
+    global OUT_DIR
     m = s["metrics"]
     fc = m.get("files_changed", "—")
     la = m.get("lines_added", "—")
@@ -260,15 +276,26 @@ def render_service_card(s):
 
     link = ""
     if s["report_path"]:
-        # 生成独立报告跳转链接。关键约束（已验证）：
-        # 1) Windows 路径统一转正斜杠，生成合法 file:/// URL；
-        # 2) 链接【不能】带 target 属性（如 target="_self"/_blank）。WorkBuddy 预览器
-        #    会拦截 file:// 链接并自行打开，带 target 反而导致点击失效。
-        #    —— 此格式与首次可用的综合报告（20260810）一致，勿回退。
-        url_path = s["report_path"].replace("\\", "/")
-        if url_path.startswith("/"):
-            url_path = url_path.lstrip("/")
-        link = f'<a href="file:///{url_path}" style="color:#1a73e8;text-decoration:none">查看独立报告 →</a>'
+        # 跳转链接生成策略（2026-09-10 可移植化改造）：
+        # - 默认【相对路径】relative：综合报告在 report/code-diff/_综合/，服务报告在
+        #   report/code-diff/{service}/，二者同级，相对路径即 ../{service}/xxx.html。
+        #   相对链接可随目录整体拷贝到任意机器直接点击，不依赖本机绝对路径，
+        #   彻底解决「发给同事打不开」的问题（单文件 HTML 亦无外部依赖）。
+        # - --absolute 时可回退旧【绝对 file:/// 路径】：仅本地预览用，路径写死本机
+        #   d:/...，不可分享。仍遵守「不带 target 属性」约束（WorkBuddy 预览器拦截
+        #   file:// 链接，带 target 点击失效，2026-08-13 实测）。
+        if absolute:
+            url_path = s["report_path"].replace("\\", "/")
+            if url_path.startswith("/"):
+                url_path = url_path.lstrip("/")
+            href = f"file:///{url_path}"
+        else:
+            try:
+                href = os.path.relpath(s["report_path"], OUT_DIR).replace("\\", "/")
+            except ValueError:
+                # 跨盘符等无法计算相对路径时回退绝对 file:///
+                href = "file:///" + s["report_path"].replace("\\", "/").lstrip("/")
+        link = f'<a href="{href}" style="color:#1a73e8;text-decoration:none">查看独立报告 →</a>'
 
     return f"""
     <div style="border:1px solid #e8eaed;border-radius:10px;padding:18px;margin-bottom:14px;background:#fff">
@@ -325,13 +352,70 @@ def render_test_priority(services):
     return f'<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#fafafa"><th style="padding:8px;text-align:left">服务</th><th style="padding:8px;text-align:left">高风险模块</th><th style="padding:8px;text-align:left">优先级</th></tr></thead><tbody>{rows}</tbody></table>'
 
 
-def render_combined_html(services, cross_links, combined_risk, cascade, out_path):
-    global OUT_PATH
+def render_bug_version_section(services):
+    """综合报告含 ≥2 服务时，汇总各版本 Bug 数据（单服务详见其独立报告）。
+
+    规则（2026-09-16 用户建议）：综合报告展示「各版本 Bug 数据明细」，
+    除非组合里只有一个服务（此时 Bug 数据已在单服务独立报告中）。
+    """
+    if len(services) < 2:
+        return ""
+    blocks = []
+    any_data = False
+    for s in services:
+        bv = s.get("bug_version", {})
+        if not bv.get("found") and not bv.get("fixed"):
+            continue
+        any_data = True
+        svc = s["service"]
+        found_rows = []
+        for ver, cnt in sorted(bv.get("found", {}).items(), key=version_key):
+            sev = bv.get("severity_by_found", {}).get(ver, {})
+            sev_str = " / ".join(f"{k} {v}" for k, v in sev.items()) if sev else "—"
+            found_rows.append(
+                f"<tr><td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{svc}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{ver}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{cnt}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{sev_str}</td></tr>")
+        fixed_rows = []
+        for ver, cnt in sorted(bv.get("fixed", {}).items(), key=version_key):
+            fixed_rows.append(
+                f"<tr><td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{svc}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{ver}</td>"
+                f"<td style='padding:6px 8px;border-bottom:1px solid #e8eaed'>{cnt}</td></tr>")
+        if found_rows or fixed_rows:
+            blocks.append(f"""
+      <div style="margin:10px 0">
+        <div style="font-size:14px;font-weight:700;margin:10px 0 6px">{svc}</div>
+        <div style="font-size:13px;color:#5f6368;margin-bottom:4px">按「产生版本」（发现版本）</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e8eaed;border-radius:8px;overflow:hidden">
+          <thead><tr style="background:#fafafa"><th style="padding:6px 8px;text-align:left">服务</th><th style="padding:6px 8px;text-align:left">产生版本</th><th style="padding:6px 8px;text-align:left">Bug 数</th><th style="padding:6px 8px;text-align:left">严重度分布</th></tr></thead>
+          <tbody>{''.join(found_rows)}</tbody></table>
+        <div style="font-size:13px;color:#5f6368;margin:8px 0 4px">按「解决版本」（修复版本）</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff;border:1px solid #e8eaed;border-radius:8px;overflow:hidden">
+          <thead><tr style="background:#fafafa"><th style="padding:6px 8px;text-align:left">服务</th><th style="padding:6px 8px;text-align:left">解决版本</th><th style="padding:6px 8px;text-align:left">Bug 数</th></tr></thead>
+          <tbody>{''.join(fixed_rows)}</tbody></table>
+      </div>""")
+    if not any_data:
+        return ""
+    return f"""
+  <div class="section">
+    <h2>⑤ 各版本 Bug 数据明细</h2>
+    <p style="font-size:13px;color:#5f6368;margin-bottom:10px">综合报告含 ≥2 服务时汇总各版本 Bug 数据（单服务详见其独立报告）。下表按服务展示产生版本 / 解决版本分布。</p>
+    <!-- BUG_TREND_COMBINED -->
+    {''.join(blocks)}
+  </div>"""
+
+
+def render_combined_html(services, cross_links, combined_risk, cascade, out_path, absolute=False):
+    global OUT_PATH, OUT_DIR
     OUT_PATH = out_path
+    OUT_DIR = os.path.dirname(out_path)
     # 综合总览
     total_files = sum(s["metrics"].get("files_changed", 0) or 0 for s in services)
     total_bugs = sum(s["bug_summary"]["total"] for s in services)
     total_closed = sum(s["bug_summary"]["closed"] for s in services)
+    total_resolved = sum(s["bug_summary"]["resolved"] for s in services)
     versions = sorted({s["version_to"] for s in services if s["version_to"]}, key=version_key)
     batch = "、".join(versions) if versions else "—"
 
@@ -340,7 +424,7 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{len(services)}</div><div style="color:#5f6368;font-size:13px">涉及服务</div></div>
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{batch}</div><div style="color:#5f6368;font-size:13px">版本批次</div></div>
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_files}</div><div style="color:#5f6368;font-size:13px">总变更文件</div></div>
-      <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_bugs}</div><div style="color:#5f6368;font-size:13px">总关联 Bug（已关闭 {total_closed}）</div></div>
+      <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_bugs}</div><div style="color:#5f6368;font-size:13px">总关联 Bug（已关闭 {total_closed} / 已解决 {total_resolved}）</div></div>
     </div>"""
 
     version_matrix_rows = "".join(
@@ -373,6 +457,7 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
     else:
         advice = "建议<b>整体发布</b>：变更风险较低，按常规回归即可。"
 
+    bug_version_section = render_bug_version_section(services)
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -402,7 +487,7 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
 
   <div class="section">
     <h2>② 各服务摘要卡</h2>
-    {''.join(render_service_card(s) for s in services)}
+    {''.join(render_service_card(s, absolute) for s in services)}
     <!-- QUANT_JIT_COMBINED -->
     <!-- BUG_PREDICT_COMBINED -->
   </div>
@@ -417,8 +502,10 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
     {render_test_priority(services)}
   </div>
 
+  {bug_version_section}
+
   <div class="section">
-    <h2>⑤ 综合发布建议</h2>
+    <h2>⑥ 综合发布建议</h2>
     <p style="font-size:14px;line-height:1.8">{advice}</p>
   </div>
 </div></body></html>"""
@@ -436,6 +523,8 @@ def main():
     ap.add_argument("--analytics-root", help="覆盖 diff-analytics 根目录")
     ap.add_argument("--report-root", help="覆盖 report/code-diff 根目录")
     ap.add_argument("--out", help="综合报告输出路径（缺省自动生成到 report/code-diff/_综合/）")
+    ap.add_argument("--absolute", action="store_true",
+                    help="跳转链接使用绝对 file:/// 路径（仅本地预览，不可分享）；默认使用相对路径以支持跨机器分享")
     args = ap.parse_args()
 
     analytics_root = args.analytics_root or os.path.join(args.workspace, ".workbuddy", "diff-analytics")
@@ -461,7 +550,7 @@ def main():
     )
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        f.write(render_combined_html(services, cross_links, combined_risk, cascade, out))
+        f.write(render_combined_html(services, cross_links, combined_risk, cascade, out, args.absolute))
 
     print(f"[OK] 综合比对报告已生成: {out}")
     print(f"     服务数={len(services)} 综合风险={RISK_LABEL.get(combined_risk, combined_risk)}"

@@ -1,9 +1,11 @@
 ---
 name: code-diff-analyzer
+version: 1.0.2
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
-version: 1.0.1
 author: Chane
+description_zh: 代码变更影响分析技能。解析 git diff、tagdiff.txt、compare_vX_to_Y.md 等变更输入，识别受影响模块、评估风险等级、规划测试范围，支持自动生成 HTML 变更报告与多服务综合 Bug 趋势分析。
+description_en: Code diff impact analysis skill. Parse git diff / tagdiff.txt / compare_vX_to_Y.md, identify affected modules, assess risk, plan test scope, and auto-generate HTML change reports with combined multi-service bug-trend analysis.
 description: >
   代码变更影响分析技能。当用户提供 Git diff、代码变更记录或版本对比内容，
   需要分析变更影响范围、评估风险等级、规划测试范围时，使用此 Skill。
@@ -11,8 +13,6 @@ description: >
   CI/CD 流水线中的变更分析、tagdiff.txt 分析、compare_vX_to_Y.md 分析等。
   支持两种输入格式：①CI/CD原始输出（tagdiff.txt）②结构化Markdown报告（compare_vX_to_Y.md）。
   支持区分「新增代码」和「变更代码」两类变更进行分别分析，并可自动生成HTML格式的变更报告。
-description_zh: 代码变更影响分析技能：解析 git diff/tagdiff.txt/compare 报告，分类新增与变更代码，分析模块依赖，评估风险等级，输出影响范围、回归测试建议与 HTML 报告。
-description_en: "Code diff impact analysis skill - parse git diff / tagdiff.txt / compare reports, classify added vs modified code, analyze module dependencies, assess risk levels, and produce impact scope, regression test plans and HTML reports."
 ---
 
 # Code Diff Analyzer — 代码变更影响分析
@@ -20,6 +20,33 @@ description_en: "Code diff impact analysis skill - parse git diff / tagdiff.txt 
 ## 技能概述
 
 分析代码仓库的变更记录（diff/PR/commit log），识别受影响的功能模块，评估风险等级，输出结构化的影响分析报告和测试建议。支持自动生成 HTML 格式的变更报告文件。
+
+## 技能更新记录（变更日志）
+
+> 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
+
+- **2026-09-16 · 综合报告新增「各版本 Bug 数据明细」+ 状态口径修正 + 版本柱状图条件注入**
+  - `gen_combined_report.py`：新增 ⑤ 各版本 Bug 数据明细 节，**仅当综合报告含 ≥2 服务时展示**（单服务 Bug 数据见其独立报告，呼应「除非只有一个服务」）；按服务展示「产生版本 / 解决版本」分布 + 严重度分布（数据来自各服务 `version_bugs.json` 的 `found_in_version` / `fixed_in_version`）。原 ⑤ 综合发布建议顺延为 ⑥。⑤ 节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，供综合柱状图注入。
+  - 综合总览「总关联 Bug」口径改为 **已关闭 X / 已解决 Y**（不再把 `已解决` 计入 `已关闭`）。
+  - `bug_correlate.py`：修正状态映射——`STATUS_CLOSED` 仅含 `已关闭/关闭`，`已解决` 单列 `resolved`（此前 `已解决` 被误并入 `closed`，导致综合报告「已关闭 23」虚高；实际为 已关闭 6 / 已解决 17）；另补充 `轻微 → low` 严重度映射（此前 `轻微` 落入默认 medium，与 `一般` 同级，语义错误）。
+  - `bug_trend.py`：**新增综合模式 `--combined --services A B C --report <综合.html>`**——`build_stats_combined()` 跨服务聚合各 `version_bugs.json` 的「版本堆叠柱状图 + 修复率 + 明细」，经 `<!-- BUG_TREND_COMBINED -->` 占位符幂等注入综合报告。由此实现**条件注入**：综合报告注入「综合跨服务」聚合图，单服务报告注入该服务独立图（用户原话「综合就综合注入，单服务就单服务注入」）。修复率口径统一为「已关闭 + 已解决」占比，卡片显示 `已关闭 / 已解决` 双数。
+  - 已端到端验证：综合柱状图成功注入 ⑤ 节（2 个 SVG，幂等可重跑）、单服务 `bug_trend` 刷新数据后一致；综合报告 0 绝对链接、3 相对链接、单 `</html>`。
+- **2026-09-10 · Bug 版本系列隔离 + 知识库定位校正**
+  - `bug_correlate.py`：`--version` + 版本系列隔离（schema 1.0→1.1）。仅保留目标系列 Bug，其余归档 `_archive/version_bugs_{系列}.json`；顺带回填 `service_metrics.json` 的 `bug_links`（修复摘要卡「关联 Bug」恒为 0）。
+  - `SKILL.md`：修正知识库用例集路径为 `初发项目/v{版本}/03-测试用例/`；补充 P1 块落位、lock 文件排除、跨服务关联脆弱性等实测坑。
+  - 设计原则新增：**Bug 数据按版本走**，分析 5.3 不应混入 5.2 历史（用户反馈：版本噪音会虚高趋势）。
+- **2026-09-10 · 综合报告跳转链接可移植化（相对路径）**
+  - `gen_combined_report.py`：独立报告链接默认改为【相对路径】（如 `../portal-backend/xxx.html`）。综合报告在 `_综合/`、服务报告在 `{service}/`，二者同级，整目录拷贝到任意机器后直接双击即可点击跳转，解决「发给同事打不开」的问题。
+  - 新增 `--absolute` 开关回退旧的绝对 `file:///d:/...` 路径（仅本地预览用，不可分享）。
+  - 已验证：生成报告输出 0 条绝对链接、3 条相对链接且全部可解析；既有 `_综合` 报告与 `code-diff-portable.zip` 已就地改写为相对链接。
+- **2026-08-21 · Bug 预测合并呈现**
+  - `gen_bug_predict.py`：缺陷倾向预判（H1/H2/H3）与 P1 用例合并进回归用例集，形成「要测什么 / 可能出什么 Bug」互补双维度。
+- **2026-08-18 · 量化风险评分 + JIT 缺陷预测整合**
+  - `gen_quant_jit.py` / `quant_jit_risk.py`：风险从「高/中/低」升级为「分数(0-100)+JIT 预测」，默认每次都跑，小 diff 但语义关键时更能暴露风险。
+- **2026-08-13 · 综合报告跳转链接修复**
+  - `gen_combined_report.py`：独立报告链接去掉 `target` 属性（WorkBuddy 预览器拦截 file:// 所致）。
+- **2026-04-28 · 格式 A v2**
+  - Jenkins `tagdiff.sh v2` 新增变更概览 / 下一层模块分布 / 文件级差异统计分区，解析锚点不变。
 
 ## 触发条件
 
@@ -51,6 +78,13 @@ description_en: "Code diff impact analysis skill - parse git diff / tagdiff.txt 
 - 代码 diff 部分紧跟 `======== 代码差异 ============` 分隔符，内容为原始 `git diff` 输出
 - diff 头以 `diff --git a/xxx b/xxx` 开头，文件间无独立标题
 - 代码变更行不含代码块包裹
+- **格式 A v2（2026-09-10 起，Jenkins `tagdiff.sh v2` 产出）**：
+  - 头部在 `仓库地址` 之后**新增** `路径过滤:` / `排除路径:` / `模块统计深度:` 三行（无过滤时显示 `<未启用，全仓库>`）
+  - Commit 记录**之前**新增两个分区：`======== 变更概览 ========`（Commit 数 / 变更文件数 / A-M-D-R-C 分布 / +/- 行数）、`======== 下一层模块分布 ========`（按目录聚合的文件数-行数表）
+  - 代码差异**之前**新增两个分区：`======== 变更文件列表 ========`（name-status）、`======== 文件级差异统计 ========`（--stat）
+  - **解析锚点不变**：仍用 `======== Commit 记录 =========` 与 `======== 代码差异 ============` 切分；上述新增分区可直接跳过
+  - 可加利用：`变更概览` 的 A/M/D/R/C 分布与 `下一层模块分布` 是风险评级的优质先验（模块集中度 = 高变更密度模块）
+  - 文件名带过滤后缀时（`*_path-apps_manage.txt`）表示该报告**只覆盖指定模块**，分析时不要当成全量变更
 
 **示例结构**：
 ```
@@ -609,13 +643,18 @@ if (circularDeps.length > 0) {
 4. 写入 HTML 文件
 5. 使用 `preview_url` 在浏览器中预览
 6. 告知用户文件路径，可直接分享给团队
-7. **【Bug 增强层自动追加】**若 `diff-analytics/{service}/version_bugs.json` 存在且非空（即做过 Bug 导入），在生成比对报告后**必须**追加运行趋势注入，将「版本 Bug 趋势分析」区块嵌入同一份报告：
-   ```bash
-   python scripts/bug_trend.py --service {service} --report {本报告.html}
-   ```
-   - 注入位置：模板 `<!-- BUG_TREND_SECTION -->` 占位符（自动替换）；已注入过则整块替换（**幂等，可重复执行**）；老报告无占位符时回退到 `</body>` 前
-   - 样式使用 `bt-` 作用域前缀，不会与被注入报告冲突
-   - 效果：每次分析后，趋势随报告一并沉淀、一并预览，无需再单独打开趋势报告
+7. **【Bug 增强层条件注入】**若 `diff-analytics/{service}/version_bugs.json` 存在且非空（即做过 Bug 导入），在生成比对报告后**必须**追加趋势注入。**注入模式按报告类型区分**：
+   - **单服务报告**（条件：`--service`）：
+     ```bash
+     python scripts/bug_trend.py --service {service} --report {本报告.html}
+     ```
+     注入位置：模板 `<!-- BUG_TREND_SECTION -->` 占位符（自动替换）；已注入过则整块替换（**幂等，可重复执行**）；老报告无占位符时回退到 `</body>` 前
+   - **综合报告**（条件：`--combined --services A B C`）：先由 `gen_combined_report.py` 在 ⑤ 节写入 `<!-- BUG_TREND_COMBINED -->` 占位符，再聚合各服务 `version_bugs.json` 注入「综合跨服务」堆叠柱状图：
+     ```bash
+     python scripts/bug_trend.py --combined --services {A} {B} {C} --report {综合报告.html}
+     ```
+     占位符 `<!-- BUG_TREND_COMBINED -->` 自动替换；已注入过则整块替换（**幂等**）；未关联 Bug 列表的服务贡献为 0。
+   - 样式使用 `bt-` 作用域前缀，不会与被注入报告冲突；效果：每次分析后趋势随报告一并沉淀、一并预览。
    - 若只想出独立趋势报告（不注入），用 `python scripts/bug_trend.py --service {service} --out <path>`
 
 8. **【P1 用例预测自动追加（必须）】**单服务报告生成后，基于 ①变更总览 / ②~④代码影响 / ⑤隐藏问题 推导 P1 用例，**必须**以「具体卡片版」注入报告的「🎯 P1 用例预测（基于影响范围）」章节（模板已预留 `<!-- P1_CASES_SECTION -->` 占位符）：
@@ -625,11 +664,19 @@ if (circularDeps.length > 0) {
      python scripts/gen_p1_cases.py --report {本报告.html} --data-file p1_cases.json
      ```
    - **知识库命中核对（必须，逐条）**：所有服务均基于「教学管理域」；**用例集按【版本】划分**（如 `v5.2` / `v5.3` …），**每轮提测按当前分析的「目标版本」动态确定要核对的用例集版本**，并非固定 v5.2。确定版本后，按【修改内容】去该版本下对应模块定位用例集并**逐条核对每条 P1 用例**：
-     - 定位路径：`output/testcases/v{目标版本}/{对应模块}/全量测试用例.md`（版本=本轮提测目标版本；模块由修改内容决定，如本轮「个人权益查看/权益订单删除/初发账号同步」对应 `v5.2/权益控制`，198 条）
+     - 定位路径（2026-09-10 实测校正）：`D:/Obsidian知识库/knowledge/初发项目/v{目标版本}/03-测试用例/{对应模块}/{模块}_v{目标版本}_测试用例.md`
+       - ⚠️ 旧文档写的 `knowledge/测试用例/v{版本}/{模块}/用例/全量测试用例.md` **已不存在**，实际在 `初发项目/` 下按版本划分，且子目录为 `03-测试用例`（与 01-需求 / 02-设计文档 / 04-用例评审 并列）
+       - 教学管理域模块与编号段：工作台 101xx / 我的班级 103xx / 学生列表 104xx / 课程管理 105xx / 班级管理 106xx / 学习档案 / 未入班
+       - 取编号：`grep -oE "^## [0-9]+ [^（(]*" "{模块}_v{版本}_测试用例.md"`
+     - 版本=本轮提测目标版本（动态确定，不写死历史版本）；模块由修改内容决定（如本轮「工作台/我的班级/学生列表」对应 `v5.3` 用例集）
      - 命中既有用例 → 该用例填 `kb_ref`（关联的编号），卡片显示绿色「✅ 已命中·关联 XXX」，可直接复用
      - 未命中（新增场景） → 该用例设 `estimated:true`，卡片显示红色「预估」，并注明（用户要求：未命中时注明，并提供部分预估测试用例）
      - 章节顶部统一显示绿色「📚 知识库用例集核对」框（已定位到 v{目标版本} 用例集 + AI 逐条核对结论 + 命中/预估计数），**不再使用「域差异全未命中红框」**（旧逻辑已废弃：所有服务本就同属教学管理域，按提测版本定位即可，不存在整集域不匹配）
+   - **⚠️ 综合报告 P1 块会落到末尾（2026-09-10 实测）**：`gen_combined_report.py` 产出的综合报告**没有「开发者建议」章节**，`gen_p1_cases.py` 找不到锚点时会把 P1 卡片追加到 `</body>` 前（在「⑤ 综合发布建议」之后）。
+     生成后需手工补：`<h2>⑥ P1 用例预测（基于影响范围 · 跨服务）</h2>` 章节标题，并在 `<!-- P1_CASES_END -->` 后补 `</div>` 闭合。
    - data JSON 结构见 `scripts/gen_p1_cases.py` 头部注释
+   - **规模统计注意（2026-09-10）**：前端仓库 diff 常含 `pnpm-lock.yaml` / `package-lock.json`，其行数会严重污染"变更行数"指标（本次 main-frontend lock 占 +264/-39）。
+     统计 `total_lines` 与「变更规模」时应**排除 lock 文件**，并在报告脚注注明已排除。
 
 8.5. **【Bug 预测（缺陷倾向预判）与 P1 合并呈现（必须，互补双维度）】**在生成 P1 用例后，**必须**运行 `gen_bug_predict.py`，将「向前看」的缺陷倾向预判（H1/H2/H3）注入到 **P1 章节之前**，形成「预判缺陷 → 可执行 P1 用例」同一回归用例集的双视角呈现（用户 2026-08-18 明确：Bug 预测与「测试范围/P1」互补，应合并进回归用例集）。
    - **与 P1 的关系**：P1 用例 = 「测试范围/可执行」（具体卡片）；Bug 预测 = 「缺陷倾向/风险点」（向前看）。二者维度互补，合并后回归测试者在同一章节即可看到「要测什么」与「可能出什么 Bug」。
@@ -638,7 +685,7 @@ if (circularDeps.length > 0) {
      ```bash
      python scripts/gen_bug_predict.py --report {本报告.html} --data-file bug_predict.json
      ```
-   - **data JSON 结构**（见 `scripts/gen_bug_predict.py` 头部注释 + 样例 `report/code-diff/portal-backend/ 下 bug_predict_52015_52016.json`）：`meta`（service/range/note）+ `items[]`（id/priority/defect_type/root/trigger/affected/confidence/verify）+ `p1_map[]`（p1/scene/bug）+ `confirm[]`。
+   - **data JSON 结构**（见 `scripts/gen_bug_predict.py` 头部注释 + 各服务 `report/code-diff/{service}/` 下 `bug_predict*.json` 样例）：`meta`（service/range/note）+ `items[]`（id/priority/defect_type/root/trigger/affected/confidence/verify）+ `p1_map[]`（p1/scene/bug）+ `confirm[]`。
    - **来源**：本维度首次在 2026-08-18 作为独立《Bug 预测分析》报告产出（文件名含 `_Bug预测分析.html`）；合并后独立报告仍保留作为专项存档，标准变更影响报告通过本脚本内嵌同维度内容。若已有独立 Bug 预测报告，可直接将其 `items`/`p1_map`/`confirm` 提炼为 JSON 供本脚本注入（pdf/html 提取皆可）。
 
 9. **【量化风险评分 & JIT 缺陷预测自动追加（apex 能力整合）· 默认每次都跑】**单服务报告生成后，**必须**运行 `gen_quant_jit.py` 把量化评分 + JIT 预测并入报告。该步骤已**固化默认执行**，无需用户单独要求。
@@ -692,8 +739,10 @@ if (circularDeps.length > 0) {
 2. **各服务摘要卡**：每个服务的风险徽章、**变更版本 from→to**、变更规模、Bug 数、专项检测、独立报告链接
 3. **跨服务关联与级联风险**：业务概念词典启发式匹配（接口路径/字段/单位/版本号），列出服务间潜在关联与级联高风险点
 4. **统一测试优先级**：合并各服务 high-risk 模块去重，输出 P1 必测清单
+5. **各版本 Bug 数据明细**：**仅当综合报告含 ≥2 服务时展示**（单服务详见其独立报告）。按服务展示「产生版本 / 解决版本」分布 + 严重度分布，数据来自各服务 `version_bugs.json` 的 `found_in_version` / `fixed_in_version`（2026-09-16 用户建议：综合报告要能看到各版本 Bug 数据）。节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，由 `bug_trend.py --combined` 注入「综合跨服务」版本堆叠柱状图（条件注入：综合报告画聚合图，单服务报告画独立图）
+   - 综合总览的「总关联 Bug」口径改为 **已关闭 X / 已解决 Y**（区分 `已解决` 与 `已关闭`，不再把 `已解决` 计入 `已关闭`，2026-09-16 修正 `bug_correlate.py` 状态映射）
 4.5. **P1 用例预测（基于影响范围）**：由 `gen_p1_cases.py` 注入，内容同单服务（具体卡片版 + 知识库命中核对 + 预估标注），重点覆盖跨服务耦合高危点
-5. **综合发布建议**：基于综合风险 + 级联 + 同批次给出发布策略
+6. **综合发布建议**：基于综合风险 + 级联 + 同批次给出发布策略
 
 ### 风险聚合规则
 - 综合风险底线 = `max(各服务最新版本风险)`
@@ -703,10 +752,10 @@ if (circularDeps.length > 0) {
 - 默认：`report/code-diff/_综合/综合比对分析报告_{服务1}_{服务2}_..._{YYYYMMDD}.html`
 - 综合模式下**仍保留各服务独立报告**，综合报告作为总入口
 
-### ⚠️ 已知坑：独立报告跳转链接（已验证，勿回退）
-- 摘要卡的「查看独立报告 →」链接格式必须为 `<a href="file:///d:/.../xxx.html">`，**不得带 `target` 属性**（如 `target="_self"`/`_blank`）。
-- 原因：WorkBuddy 预览器会拦截 `file://` 链接并自行打开文件；一旦带 `target` 属性点击即失效（2026-08-13 实测：去掉 `target` 后跳转恢复正常，与首次可用报告 20260810 格式一致）。
-- 路径须统一为正斜杠（`report_path.replace("\\","/")`），生成合法 `file:///` URL。
+### ⚠️ 独立报告跳转链接（2026-09-10 可移植化）
+- **默认用相对路径（推荐，可跨机器分享）**：综合报告在 `report/code-diff/_综合/`，服务报告在 `report/code-diff/{service}/`，二者同级，链接写为 `../{service}/xxx.html`。整目录拷贝到任意机器后直接双击 `_综合/xxx.html` 即可点击跳转，不依赖本机绝对路径。
+- **`--absolute` 回退绝对路径（仅本地预览，不可分享）**：加 `--absolute` 时链接回退为 `<a href="file:///d:/.../xxx.html">`，路径写死本机。仍须**不带 `target` 属性**（WorkBuddy 预览器拦截 file:// 链接，带 target 点击失效，2026-08-13 实测）。
+- 路径须统一为正斜杠（`report_path.replace("\\","/")`）。
 - 若预览面板仍跳不过去，多为 http 渲染沙箱拦截 file:// 所致，改用 present_files 的三张卡片直接打开即可。
 
 ---
@@ -773,14 +822,29 @@ Bug 列表格式已固化（TAPD 导出，`bug` sheet，17 列）：
 **脚本**：`scripts/bug_correlate.py`（同时完成 Flow A 解析 + Flow B 映射）
 
 ```bash
-# 指定服务
-python scripts/bug_correlate.py --xlsx "5.2.0.9bug列表.xlsx" --service portal-backend
+# 指定服务 + 目标版本（推荐：按版本系列隔离）
+python scripts/bug_correlate.py --xlsx "5.3.0.0bug列表.xlsx" --service portal-backend --version 5.3.0.2
 # 不指定服务时，自动按版本匹配 diff-analytics 中各服务的 version_chain.json 探测
-python scripts/bug_correlate.py --xlsx "5.2.0.9bug列表.xlsx"
+python scripts/bug_correlate.py --xlsx "5.3.0.0bug列表.xlsx"
+# 旧行为：保留全部版本系列不做归档（不推荐）
+python scripts/bug_correlate.py --xlsx "..." --service portal-backend --keep-all
 ```
 
 脚本行为（防错设计）：
-- **全量覆写** `version_bugs.json`：每次都以 xlsx 为唯一权威来源重新生成全部记录，不 append、不保留"记忆中的旧状态"
+- **按版本系列隔离（2026-09-10 新增，默认启用）**：Bug 数据**按版本走**——只保留属于「本次分析版本系列」的记录，其余自动归档，
+  `version_bugs.json` 不再跨版本堆积历史噪音。
+  - **版本系列** = 版本号前两段（`business-5.3.0.2` / `v5.3.0.3` / `5.3.0.0` 均 → `5.3`）
+  - **保留条件**：`found_in_version` **或** `fixed_in_version` 属于目标系列。
+    后者用于保留「历史 Bug 但在本轮版本修复」的场景（如产生版本 5.0.0.0、解决版本 5.3.0.0），这类本轮必须回归。
+  - **归档位置**：`diff-analytics/{service}/_archive/version_bugs_{系列}.json`（如 `version_bugs_5.2.json`），按 `bug_id` 合并去重；
+    归档文件带 `version_series` / `archived_at` / `archived_reason`，需要跨版本趋势时可再取回。
+  - `--version` 显式指定目标版本（推荐）；缺省时自动探测（xlsx 中出现频次最高的系列，回退 version_chain 最新版本）。
+  - `--keep-all` 可恢复旧的全量平铺行为（不推荐）。
+- **全量覆写** `version_bugs.json`：每次都以 xlsx 为唯一权威来源重新生成**目标系列**的记录，不 append、不保留"记忆中的旧状态"
+- **自动回填 `bug_links`（2026-09-10 新增）**：把本轮 Bug id 写入 `service_metrics.json` 中对应版本记录的 `bug_links`。
+  综合报告摘要卡的「关联 Bug」读该字段，**不回填会一直显示 0**（历史遗留问题，已修复）。
+- **多服务归属**：一份 Bug 列表常横跨前后端（如 5.3.0.0 列表既有后端统计口径也有前端文案）。综合报告按服务**求和**，同一份列表导入到多个服务会导致 Bug 数**翻倍**。
+  建议：整份导入到**主服务**（通常是有历史数据的后端服务），其余服务在报告中做定性引用，不重复导入。
 - **状态映射**：`状态` 列 `已关闭/已解决/关闭` → `closed`，其余 → `open`（绝不凭"同文件/同方法"推断未解决）
 - **严重程度映射**：`严重`→critical / `高`→high / `一般`·`中`→medium / `低`·`建议`→low；同时保留 `severity_raw` 原文
 - **编号清洗**：Excel 浮点 `80729.0` → `80729`
@@ -882,21 +946,26 @@ python scripts/bug_correlate.py --xlsx "5.2.0.9bug列表.xlsx"
 **脚本**：`scripts/bug_trend.py`（依赖：`version_bugs.json`，可选 `version_chain.json` / `service_metrics.json` 做版本排序与变更比）
 
 ```bash
-# 模式 A：注入到当次生成的比对分析报告（推荐，每次分析自动追加）
+# 模式 A：注入到单服务比对分析报告（推荐，每次分析自动追加）
 python scripts/bug_trend.py --service portal-backend \
   --report "report/code-diff/portal-backend/portal-backend_xxx_变更影响分析报告.html"
 
 # 模式 B：生成独立趋势报告
 python scripts/bug_trend.py --service portal-backend \
   --out "report/code-diff/portal-backend/portal-backend_bug趋势统计.html"
+
+# 模式 C：综合报告「综合跨服务」聚合注入（仅综合报告，--combined + --services）
+python scripts/bug_trend.py --combined --services portal-backend main-frontend manage-frontend \
+  --report "report/code-diff/_综合/综合比对分析报告_xxx.html"
 ```
 
 脚本输出（单文件、内联 SVG 图表、**无 CDN 依赖**，适配内网）：
-- 概览卡片：Bug 总数 / 已关闭数 / 整体修复率 / 平均修复版本间隔
+- 概览卡片：Bug 总数 / **已关闭 / 已解决**（双数） / 整体修复率（已关闭+已解决占比）/ 平均修复版本间隔
 - 图①：各版本 Bug 数（按严重度堆叠柱状图）
-- 图②：各版本修复率（发现版本内已关闭占比）
-- 表③：版本维度明细（发现/修复 Bug 数、严重度、已关闭、修复率、变更文件数、Bug/变更比）
-- **注入模式（`--report`）**：以 `bt-` 作用域样式嵌入比对报告，幂等可重复执行，自动落到报告的「版本 Bug 趋势分析」区块
+- 图②：各版本修复率（发现版本内已关闭/已解决占比）
+- 表③：版本维度明细（发现/修复 Bug 数、严重度、已关闭/解决、修复率、变更文件数、Bug/变更比）
+- **单服务注入（`--service --report`）**：以 `bt-` 作用域样式嵌入比对报告，幂等可重复执行，落到「版本 Bug 趋势分析（跨版本累计）」区块
+- **综合注入（`--combined --services --report`）**：`build_stats_combined()` 跨服务聚合各 `version_bugs.json`，经 `<!-- BUG_TREND_COMBINED -->` 占位符注入综合报告「各版本 Bug 数据明细」节；**条件注入规则：综合报告→聚合图，单服务报告→独立图**
 
 ### C.3 分析输出格式
 

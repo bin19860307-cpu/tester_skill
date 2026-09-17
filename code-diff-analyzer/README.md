@@ -5,7 +5,7 @@
 ## 安装
 方式一，命令行安装（支持 Claude Code / Codex / Cursor / Gemini CLI 等）：
 ```bash
-npx skills add bin19860307-cpu/tester_skill --skill code-diff-analyzer
+npx skills add <your-github-id>/<your-repo> --skill code-diff-analyzer
 ```
 
 方式二，手动安装：把整个 `code-diff-analyzer/` 目录复制到你的 skills 目录：
@@ -82,7 +82,7 @@ code-diff-analyzer/
 
 ## 版本
 
-当前 v1.0.0。
+当前 v1.0.2。
 
 ## 许可
 
