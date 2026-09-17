@@ -35,7 +35,11 @@ import argparse
 import json
 import os
 import re
+import sys
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层（含缺失的 sys 兜底）
 
 SEV_ORDER = ["critical", "high", "medium", "low"]
 SEV_LABEL = {"critical": "严重", "high": "高", "medium": "一般/中", "low": "低/建议"}
@@ -55,13 +59,8 @@ def version_key(v):
 
 
 def load_json(path):
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    """读取 JSON：不存在→None（静默）；存在但格式异常→明确 WARN 并返回 None。"""
+    return cdx_errors.try_json(path)
 
 
 def build_stats(service, analytics_root):
@@ -424,7 +423,8 @@ PLACEHOLDER = "<!-- BUG_TREND_SECTION -->"
 
 def embed_into_report(section_html, report_path):
     if not os.path.isfile(report_path):
-        raise SystemExit(f"[ERROR] 比对报告不存在: {report_path}")
+        cdx_errors.die("比对报告不存在（--report）", "路径: %s" % os.path.abspath(report_path),
+                       hint="先跑单服务分析生成 HTML 报告，或用 --out 直接输出趋势报告。", code=3)
     with open(report_path, encoding="utf-8") as f:
         html = f.read()
 
@@ -458,7 +458,8 @@ END_MARK_COMBINED = "<!-- BUG_TREND_COMBINED_END -->"
 
 def embed_combined_into_report(section_html, report_path):
     if not os.path.isfile(report_path):
-        raise SystemExit(f"[ERROR] 综合比对报告不存在: {report_path}")
+        cdx_errors.die("综合比对报告不存在（--report）", "路径: %s" % os.path.abspath(report_path),
+                       hint="先用 gen_combined_report.py 生成综合报告，再注入趋势区块。", code=3)
     with open(report_path, encoding="utf-8") as f:
         html = f.read()
 
@@ -505,15 +506,14 @@ def main():
     # —— 综合模式：跨服务聚合注入 ——
     if args.combined:
         if not args.services:
-            sys.stderr.write("[ERROR] 综合模式需 --services 指定参与服务\n")
-            raise SystemExit(1)
+            cdx_errors.die("综合模式需 --services", hint="例：--combined --services portal-backend manage-front", code=2)
         if not args.report:
-            sys.stderr.write("[ERROR] 综合模式需 --report 指定综合报告 HTML\n")
-            raise SystemExit(1)
+            cdx_errors.die("综合模式需 --report", hint="指定要注入趋势区块的综合报告 HTML 路径。", code=2)
         stats = build_stats_combined(args.services, analytics_root)
         if not stats:
-            sys.stderr.write("[ERROR] 所有参与服务均无 version_bugs.json（无关联 Bug），跳过综合注入\n")
-            raise SystemExit(1)
+            cdx_errors.die("参与服务均无 version_bugs.json（无关联 Bug）",
+                           "服务: %s" % ", ".join(args.services),
+                           hint="先对各服务运行 bug_correlate.py 导入 Bug 数据。", code=4)
         section = render_combined_section(stats)
         mode = embed_combined_into_report(section, args.report)
         print(f"[OK] 综合趋势区块已{mode}注入: {args.report}")
@@ -524,12 +524,13 @@ def main():
 
     # —— 单服务模式 ——
     if not args.service:
-        sys.stderr.write("[ERROR] 请指定 --service（单服务）或 --combined --services（综合）\n")
-        raise SystemExit(1)
+        cdx_errors.die("需指定服务",
+                       hint="单服务: --service <名>；综合: --combined --services <名1> <名2>", code=2)
     stats = build_stats(args.service, analytics_root)
     if not stats:
-        sys.stderr.write("[ERROR] 未找到该服务的 version_bugs.json 或为空，请先运行 bug_correlate.py 导入 Bug 数据\n")
-        raise SystemExit(1)
+        cdx_errors.die("未找到服务 %s 的 version_bugs.json 或为空" % args.service,
+                       "查找目录: %s" % os.path.join(analytics_root, args.service),
+                       hint="先运行 bug_correlate.py 导入 Bug 数据；核对 --analytics-root 是否正确。", code=4)
 
     if args.report:
         section = render_embed_html(stats)
@@ -552,4 +553,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

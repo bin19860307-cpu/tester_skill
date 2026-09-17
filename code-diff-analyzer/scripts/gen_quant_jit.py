@@ -42,6 +42,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from quant_jit_risk import compute, generate_jit, auto_historical, CORE_PATTERNS  # noqa
+import cdx_errors  # noqa: E402  统一错误提示层
 
 # —— 单服务：注入守卫 ——
 START = "<!-- QUANT_JIT_START -->"
@@ -253,7 +254,7 @@ def main():
     if args.combined:
         report_root = args.report_root or os.path.join(args.workspace, "report", "code-diff")
         if not args.services:
-            print("ERROR: --combined 需提供 --services"); sys.exit(1)
+            cdx_errors.die("--combined 需提供 --services", hint="例：--combined --services a b c", code=2)
         rows = []
         for svc in args.services:
             st = derive_stats_for_combined(svc, report_root)
@@ -262,23 +263,24 @@ def main():
                 continue
             rows.append((svc, compute(st), generate_jit(st)))
         if not rows:
-            print("[ERROR] 未派生到任何服务量化数据"); sys.exit(1)
-        html = open(args.report, encoding="utf-8").read()
+            cdx_errors.die("未派生到任何服务量化数据",
+                           "服务: %s\n报告根目录: %s" % (", ".join(args.services), report_root),
+                           hint="确认各服务已有独立报告 HTML（含变更总览指标）。", code=4)
+        html = cdx_errors.read_text(args.report, "综合报告 HTML（--report）")
         out = inject_combined(html, render_combined_table(rows))
         open(args.report, "w", encoding="utf-8").write(out)
         print("OK: 综合报告注入 %d 个服务量化/JIT 汇总" % len(rows))
         return
 
     # —— 单服务 ——
-    if not os.path.exists(args.report):
-        print("ERROR: 报告不存在 %s" % args.report); sys.exit(1)
-    html = open(args.report, encoding="utf-8").read()
+    html = cdx_errors.read_text(args.report, "报告 HTML（--report）",
+                                hint="先由上游生成报告 HTML，再注入量化评分。")
 
     stats = None
     if args.stats:
-        stats = json.load(open(args.stats, encoding="utf-8"))
+        stats = cdx_errors.read_json(args.stats, "stats JSON（--stats）")
     elif args.stats_json:
-        stats = json.loads(args.stats_json)
+        stats = cdx_errors.parse_json_arg(args.stats_json, "stats JSON（--stats-json）")
     if stats is None:
         stats = derive_stats_from_report(html)
         print("INFO: --auto 派生 stats = %s" % json.dumps(stats, ensure_ascii=False))
@@ -298,4 +300,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

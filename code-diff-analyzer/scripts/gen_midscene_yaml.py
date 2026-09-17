@@ -25,6 +25,10 @@ import argparse
 import json
 import os
 import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层
 
 CIRCLED = re.compile(r'[①②③④⑤⑥⑦⑧⑨⑩]')
 TRIM = ' 、,，;；.。\t'
@@ -102,8 +106,10 @@ def main():
     ap.add_argument('--module', default='权益控制')
     args = ap.parse_args()
 
-    with open(args.data_file, encoding='utf-8') as f:
-        data = json.load(f)
+    data = cdx_errors.read_json(args.data_file, "用例 JSON（--data-file）")
+    if not isinstance(data, dict):
+        cdx_errors.die("用例 JSON 顶层结构不是对象", "实际类型: %s" % type(data).__name__,
+                       hint='期望形如 {"groups":[{"cases":[...]}]} 的对象。', code=4)
 
     os.makedirs(args.out_dir, exist_ok=True)
     count = 0
@@ -133,4 +139,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    cdx_errors.guard(main)

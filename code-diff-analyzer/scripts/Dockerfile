@@ -18,7 +18,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 拷贝固化脚本 + 统一入口
-COPY bug_correlate.py bug_trend.py gen_combined_report.py gen_p1_cases.py pipeline_wrapper.py ./
+COPY bug_correlate.py bug_trend.py gen_combined_report.py gen_p1_cases.py pipeline_wrapper.py cdx_errors.py ./
 
 # git 用于 analyze 阶段的浅克隆
 RUN apt-get update \

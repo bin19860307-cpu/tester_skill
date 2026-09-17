@@ -51,6 +51,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层
+
 # ---------- 权重 ----------
 W5 = {"base": 0.30, "size": 0.20, "span": 0.15, "core": 0.25, "density": 0.10}
 W10 = {"base": 0.20, "size": 0.15, "span": 0.10, "core": 0.20, "density": 0.05,
@@ -220,7 +223,9 @@ def auto_historical(service, workspace):
         mod_count = 0
         n = 0
         if os.path.exists(fh):
-            data = json.load(open(fh, encoding="utf-8"))
+            data = cdx_errors.try_json(fh, "file_history.json")
+            if data is None:
+                return None
             files = data if isinstance(data, dict) else data.get("files", {})
             for v in files.values():
                 cc = v.get("change_count", 0) if isinstance(v, dict) else 0
@@ -230,7 +235,9 @@ def auto_historical(service, workspace):
                 mod_count = round(mod_count / n, 1)
         buggy_ratio = 0.0
         if os.path.exists(vb):
-            data = json.load(open(vb, encoding="utf-8"))
+            data = cdx_errors.try_json(vb, "version_bugs.json")
+            if data is None:
+                return None
             bugs = data.get("bugs", data) if isinstance(data, dict) else data
             if isinstance(bugs, list) and bugs:
                 buggy_ratio = round(sum(1 for b in bugs if b.get("status") not in ("closed", "关闭", "已关闭")) / len(bugs), 3)
@@ -248,7 +255,10 @@ def main():
     ap.add_argument("--service", help="服务名（尝试从 diff-analytics 自动补历史度量）")
     ap.add_argument("--workspace", help="工作区根目录（配合 --service）")
     args = ap.parse_args()
-    stats = json.load(open(args.stats, encoding="utf-8"))
+    stats = cdx_errors.read_json(args.stats, "stats JSON（--stats）")
+    if not isinstance(stats, dict):
+        cdx_errors.die("stats JSON 顶层结构不是对象", "实际类型: %s" % type(stats).__name__,
+                       hint="stats 应为含变更指标的对象（如 files_changed / lines_added）。", code=4)
     if args.service and args.workspace:
         h = auto_historical(args.service, args.workspace)
         if h and "historical_metrics" not in stats:
@@ -260,4 +270,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

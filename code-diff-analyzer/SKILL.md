@@ -1,6 +1,6 @@
 ---
 name: code-diff-analyzer
-version: 1.0.3
+version: 1.0.4
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
 author: Chane
@@ -25,6 +25,13 @@ description: >
 
 > 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
 
+- **2026-09-17 · 错误提示友好化（统一层 cdx_errors）+ 版本升至 1.0.4**
+  - 根因：SkillHub 评审反馈「文件路径错误或数据格式不匹配时，可能会给出让人摸不着头脑的错误提示」。此前沿用 `json.load(open(path))` / `openpyxl.load_workbook(path)` / `open(path).read()`，失败时抛原生 traceback（FileNotFoundError / JSONDecodeError / KeyError / InvalidFileException），非开发用户不可读；且多处 `except: pass` 静默吞错。
+  - 新增 `scripts/cdx_errors.py`（纯标准库）统一错误层：`die / require_file / read_text / read_json / try_json / parse_json_arg / open_xlsx / check_headers / guard`；把失败转为「问题文件 + 原因 + 修复建议」中文块。
+  - 8 个脚本全部接线 `import cdx_errors` + 用友好读取代裸读 + 末行 `cdx_errors.guard(main)` 顶层兜底（`--debug` / `CDX_DEBUG=1` 打印完整堆栈）。
+  - 顺带修真实缺陷：`bug_trend.py` / `gen_combined_report.py` 错误分支用 `sys.stderr.write` 却**漏 `import sys`**，命中错误路径会 `NameError`；`bug_correlate.py` 顶层 eager `import openpyxl` 会先于「文件不存在」报错——改为 lazy import，使「文件路径错误」优先报文件问题。
+  - `Dockerfile` 补 `COPY cdx_errors.py ./`（避免镜像 ImportError）。
+  - 退出码约定：1 未预期 / 2 参数依赖 / 3 输入文件 / 4 数据格式。版本 1.0.3 → 1.0.4。
 - **2026-09-17 · 投稿包合规修正 + 版本升至 1.0.3**
   - 平台投稿 zip 按文件类型白名单校验：剔除各 skill 自带 `.gitignore`；无扩展名文件补 `.txt`（`LICENSE`→`LICENSE.txt`、`scripts/Dockerfile`→`Dockerfile.txt`）。
   - 统一用 `build_upload_zip.py` 重打包；版本 1.0.2 → 1.0.3（规避平台「重投版本须 > 已记录」红线）。

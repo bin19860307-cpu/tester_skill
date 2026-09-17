@@ -29,11 +29,8 @@ import re
 import sys
 from datetime import datetime, date
 
-try:
-    import openpyxl
-except ImportError:
-    sys.stderr.write("[ERROR] 缺少 openpyxl，请先 pip install openpyxl\n")
-    sys.exit(2)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层（路径/格式错误友好化）
 
 
 # ----------------------------------------------------------------------------
@@ -162,13 +159,22 @@ def version_key(v):
 # 读取 + 规范化
 # ----------------------------------------------------------------------------
 def parse_xlsx(path):
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb["bug"] if "bug" in wb.sheetnames else wb.worksheets[0]
+    wb = cdx_errors.open_xlsx(path, "TAPD Bug Excel")
+    if "bug" in wb.sheetnames:
+        ws = wb["bug"]
+    else:
+        ws = wb.worksheets[0]
+        cdx_errors.warn("Excel 未找到名为 'bug' 的工作表，改用第一个工作表 '%s'（可选工作表: %s）"
+                        % (ws.title, ", ".join(wb.sheetnames)))
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
-        return [], []
+        cdx_errors.die("Excel 首个工作表为空: %s" % path,
+                       "工作表 '%s' 无任何行。" % ws.title,
+                       hint="确认导出的是含表头 + 数据行的 TAPD Bug 列表。", code=4)
     headers = [str(h).strip() if h is not None else "" for h in rows[0]]
     hidx = build_header_index(rows[0])
+    # 必需列校验：缺『编号』列必然解析不出记录，提前报明确原因（而非返回空列表）
+    cdx_errors.check_headers(rows[0], {"bug_id": COLUMN_MAP["bug_id"]}, "TAPD Bug Excel")
     bugs = []
     for r in rows[1:]:
         bid = to_id(r[hidx["bug_id"]]) if "bug_id" in hidx else None
@@ -213,11 +219,10 @@ def detect_service(analytics_root, bug_versions):
         chain_path = os.path.join(analytics_root, svc, "version_chain.json")
         if not os.path.isfile(chain_path):
             continue
-        try:
-            chain = json.load(open(chain_path, encoding="utf-8"))
-        except Exception:
+        chain = cdx_errors.try_json(chain_path, "version_chain.json")
+        if not isinstance(chain, dict):
             continue
-        known = {v.get("version") for v in chain.get("versions", [])}
+        known = {v.get("version") for v in chain.get("versions", []) if isinstance(v, dict)}
         cnt = sum(1 for bv in bug_versions if bv in known)
         if cnt > best_count:
             best, best_count = svc, cnt
@@ -235,26 +240,24 @@ def run_mapping_engine(service, analytics_root, bugs):
     versions_in_chain = []
     parent_map = {}
     if os.path.isfile(chain_path):
-        try:
-            chain = json.load(open(chain_path, encoding="utf-8"))
+        chain = cdx_errors.try_json(chain_path, "version_chain.json")
+        if isinstance(chain, dict):
             for v in chain.get("versions", []):
+                if not isinstance(v, dict):
+                    continue
                 ver = v.get("version")
                 if ver:
                     versions_in_chain.append(ver)
                     if v.get("parent"):
                         parent_map[ver] = v["parent"]
-        except Exception:
-            pass
 
     metrics_map = {}
     if os.path.isfile(metrics_path):
-        try:
-            m = json.load(open(metrics_path, encoding="utf-8"))
+        m = cdx_errors.try_json(metrics_path, "service_metrics.json")
+        if isinstance(m, dict):
             for rec in m.get("records", []):
-                if rec.get("version_to"):
+                if isinstance(rec, dict) and rec.get("version_to"):
                     metrics_map[rec["version_to"]] = rec
-        except Exception:
-            pass
 
     # 版本全集 = 链路版本 ∪ bug 涉及版本
     all_versions = set(versions_in_chain)
@@ -390,14 +393,14 @@ def main():
     args = ap.parse_args()
 
     analytics_root = args.analytics_root or os.path.join(args.workspace, ".workbuddy", "diff-analytics")
-    if not os.path.isfile(args.xlsx):
-        sys.stderr.write(f"[ERROR] xlsx 不存在: {args.xlsx}\n")
-        sys.exit(1)
+    cdx_errors.require_file(args.xlsx, "TAPD Bug Excel（--xlsx）",
+                            hint="传入 TAPD 导出的 .xlsx 绝对路径；路径含空格/中文请加英文引号。")
 
     headers, bugs = parse_xlsx(args.xlsx)
     if not bugs:
-        sys.stderr.write("[ERROR] 未解析到任何 bug 记录，请检查 sheet 名/列名\n")
-        sys.exit(1)
+        cdx_errors.die("未从 Excel 解析到任何 Bug 记录",
+                       "已识别表头: %s" % (", ".join(h for h in headers if h)[:200] or "（空）"),
+                       hint="确认工作表含『编号』列、且数据行非空（空行会被跳过）。", code=4)
 
     # 服务判定
     service = args.service
@@ -406,8 +409,9 @@ def main():
                        [b["fixed_in_version"] for b in bugs if b["fixed_in_version"]]
         service = detect_service(analytics_root, bug_versions)
         if not service:
-            sys.stderr.write("[ERROR] 无法自动探测服务，请用 --service 指定\n")
-            sys.exit(1)
+            cdx_errors.die("无法自动探测服务",
+                           "已扫描 %s 下各服务的 version_chain.json，均未匹配到 Bug 版本。" % analytics_root,
+                           hint="用 --service <服务名> 显式指定。", code=4)
         print(f"[INFO] 自动探测服务: {service}")
 
     svc_dir = os.path.join(analytics_root, service)
@@ -431,10 +435,8 @@ def main():
                     # 同系列已有归档则合并去重（按 bug_id）
                     existing = []
                     if os.path.isfile(path):
-                        try:
-                            existing = json.load(open(path, encoding="utf-8")).get("bugs", [])
-                        except Exception:
-                            existing = []
+                        doc_existing = cdx_errors.try_json(path, "version_bugs_%s.json" % series)
+                        existing = doc_existing.get("bugs", []) if isinstance(doc_existing, dict) else []
                     merged = {b["bug_id"]: b for b in existing}
                     for b in items:
                         merged[b["bug_id"]] = b
@@ -451,9 +453,9 @@ def main():
                     archived_total += len(items)
             bugs = keep
             if not bugs:
-                sys.stderr.write(
-                    f"[ERROR] 按版本系列 {target_series} 过滤后无任何 Bug，请确认 --version 是否正确\n")
-                sys.exit(1)
+                cdx_errors.die("按版本系列 %s 过滤后无任何 Bug" % target_series,
+                               "Excel 中的 Bug 版本系列均不属于 %s。" % target_series,
+                               hint="确认 --version 是否正确，或用 --keep-all 保留全部系列。", code=4)
 
     # 按版本系列覆写 version_bugs.json（xlsx 为权威来源，仅覆盖目标系列）
     version_bugs = {
@@ -476,7 +478,9 @@ def main():
     try:
         mp = os.path.join(svc_dir, "service_metrics.json")
         if os.path.isfile(mp):
-            metrics = json.load(open(mp, encoding="utf-8"))
+            metrics = cdx_errors.try_json(mp, "service_metrics.json")
+            if not isinstance(metrics, dict):
+                raise ValueError("service_metrics.json 结构不是对象（无法回填 bug_links）")
             ids = [b["bug_id"] for b in bugs if b.get("bug_id")]
             target_rec = None
             for rec in reversed(metrics.get("records", [])):
@@ -516,4 +520,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

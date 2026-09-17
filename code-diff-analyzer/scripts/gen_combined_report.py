@@ -33,7 +33,11 @@ import json
 import os
 import re
 import glob
+import sys
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层（含缺失的 sys 兜底）
 
 RISK_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
 RISK_LABEL = {"high": "高", "medium": "中", "low": "低"}
@@ -101,13 +105,8 @@ def version_key(v):
 
 
 def load_json(path):
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    """读取 JSON：不存在→None（静默）；存在但格式异常→明确 WARN 并返回 None。"""
+    return cdx_errors.try_json(path)
 
 
 # ---------------------------------------------------------------------------
@@ -533,13 +532,16 @@ def main():
     services = []
     for svc in args.services:
         if not os.path.isdir(os.path.join(analytics_root, svc)):
-            sys.stderr.write(f"[WARN] 跳过未找到 analytics 的服务: {svc}\n")
+            cdx_errors.warn("跳过未找到 analytics 目录的服务: %s（期望目录 %s）"
+                            % (svc, os.path.join(analytics_root, svc)))
             continue
         services.append(load_service(svc, analytics_root, report_root))
 
     if not services:
-        sys.stderr.write("[ERROR] 未加载到任何有效服务数据，请先对各服务运行单服务分析。\n")
-        raise SystemExit(1)
+        cdx_errors.die("未加载到任何有效服务数据",
+                       "参与服务: %s\nanalytics 根目录: %s" % (", ".join(args.services), analytics_root),
+                       hint="先对各服务运行单服务分析（生成 service_metrics.json），或核对 --analytics-root。",
+                       code=4)
 
     cross_links = find_cross_links(services)
     combined_risk, cascade = aggregate_risk(services, cross_links)
@@ -558,4 +560,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

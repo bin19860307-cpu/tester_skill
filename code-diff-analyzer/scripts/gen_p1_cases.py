@@ -55,6 +55,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # noqa: E402  统一错误提示层
+
 START = "<!-- P1_CASES_START -->"
 END = "<!-- P1_CASES_END -->"
 PLACEHOLDER = "<!-- P1_CASES_SECTION -->"
@@ -153,16 +156,17 @@ def main():
     ap.add_argument("--data-file", help="P1 用例 JSON 文件路径")
     args = ap.parse_args()
     if args.data_file:
-        data = json.load(open(args.data_file, encoding="utf-8"))
+        data = cdx_errors.read_json(args.data_file, "P1 用例 JSON（--data-file）")
     elif args.data:
-        data = json.loads(args.data)
+        data = cdx_errors.parse_json_arg(args.data, "P1 用例 JSON（--data）")
     else:
-        print("ERROR: 需提供 --data 或 --data-file")
-        sys.exit(1)
-    if not os.path.exists(args.report):
-        print("ERROR: 报告不存在 %s" % args.report)
-        sys.exit(1)
-    html = open(args.report, encoding="utf-8").read()
+        cdx_errors.die("缺少 P1 用例数据", hint="提供 --data-file <路径> 或 --data '<JSON>'。", code=2)
+    if not isinstance(data, dict):
+        cdx_errors.die("P1 用例 JSON 顶层结构不是对象",
+                       "实际类型: %s" % type(data).__name__,
+                       hint='期望形如 {"groups":[{"cases":[...]}]} 的对象。', code=4)
+    html = cdx_errors.read_text(args.report, "目标报告 HTML（--report）",
+                                hint="先由上游生成报告 HTML，再注入 P1 用例。")
     frag = render(data)
     out = inject(html, frag)
     open(args.report, "w", encoding="utf-8").write(out)
@@ -171,4 +175,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)
