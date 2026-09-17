@@ -1,6 +1,6 @@
 ---
 name: code-diff-analyzer
-version: 1.0.2
+version: 1.0.3
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
 author: Chane
@@ -25,6 +25,9 @@ description: >
 
 > 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
 
+- **2026-09-17 · 投稿包合规修正 + 版本升至 1.0.3**
+  - 平台投稿 zip 按文件类型白名单校验：剔除各 skill 自带 `.gitignore`；无扩展名文件补 `.txt`（`LICENSE`→`LICENSE.txt`、`scripts/Dockerfile`→`Dockerfile.txt`）。
+  - 统一用 `build_upload_zip.py` 重打包；版本 1.0.2 → 1.0.3（规避平台「重投版本须 > 已记录」红线）。
 - **2026-09-16 · 综合报告新增「各版本 Bug 数据明细」+ 状态口径修正 + 版本柱状图条件注入**
   - `gen_combined_report.py`：新增 ⑤ 各版本 Bug 数据明细 节，**仅当综合报告含 ≥2 服务时展示**（单服务 Bug 数据见其独立报告，呼应「除非只有一个服务」）；按服务展示「产生版本 / 解决版本」分布 + 严重度分布（数据来自各服务 `version_bugs.json` 的 `found_in_version` / `fixed_in_version`）。原 ⑤ 综合发布建议顺延为 ⑥。⑤ 节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，供综合柱状图注入。
   - 综合总览「总关联 Bug」口径改为 **已关闭 X / 已解决 Y**（不再把 `已解决` 计入 `已关闭`）。
