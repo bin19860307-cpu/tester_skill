@@ -33,6 +33,7 @@ data JSON 结构（见 bug_predict_52015_52016.json 样例）：
 """
 
 import argparse
+import cdx_errors  # 统一友好错误层
 import json
 import os
 import re
@@ -266,7 +267,7 @@ def main():
     if not os.path.exists(args.report):
         print("ERROR: 报告不存在 %s" % args.report)
         sys.exit(1)
-    html = open(args.report, encoding="utf-8").read()
+    html = cdx_errors.read_text(args.report)
 
     if args.combined:
         report_root = os.path.join(args.workspace, "report", "code-diff")
@@ -280,7 +281,7 @@ def main():
             if not p:
                 missing.append(svc)
                 continue
-            svc_data.append((svc, json.load(open(p, encoding="utf-8"))))
+            svc_data.append((svc, cdx_errors.read_json(p)))
         if missing:
             sys.stderr.write("[WARN] 以下服务无 bug_predict*.json，已跳过：%s\n" % ", ".join(missing))
         if not svc_data:
@@ -294,7 +295,7 @@ def main():
 
     # 单服务模式
     if args.data_file:
-        data = json.load(open(args.data_file, encoding="utf-8"))
+        data = cdx_errors.read_json(args.data_file)
     elif args.data:
         data = json.loads(args.data)
     else:
@@ -308,4 +309,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

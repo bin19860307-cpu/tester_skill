@@ -45,6 +45,7 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import (  # noqa: E402
     norm_version, version_key as _version_key, version_series, same_version,
     load_bugs_doc, classify_bug_side, PROJECT_SERVICE, PROJECT_POOL_DIR,
@@ -797,4 +798,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

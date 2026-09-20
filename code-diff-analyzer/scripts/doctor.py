@@ -39,6 +39,7 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import (  # noqa: E402
     norm_version, version_key, inconsistent_keys, is_junk_path, normalize_path,
     load_bugs_doc, PROJECT_POOL_DIR,
@@ -529,4 +530,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cdx_errors.guard(main))

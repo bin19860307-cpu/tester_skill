@@ -38,6 +38,7 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import norm_version  # noqa: E402
 import sync_analytics as sa  # noqa: E402
 
@@ -349,4 +350,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cdx_errors.guard(main))

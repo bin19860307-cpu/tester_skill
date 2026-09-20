@@ -24,6 +24,7 @@ scoring.py — Code Diff Analyzer · 统一口径模块（单一真源）
 便于历史记录审计（不做静默覆盖）。
 """
 import os
+import cdx_errors  # 统一友好错误层
 import re
 
 try:
@@ -291,7 +292,7 @@ def is_logic_file(p):
     return is_logic_path(p)
 
 
-if __name__ == "__main__":
+def main():
     import json
     import sys
     # Windows 默认控制台常为 GBK，直接输出评级 emoji 会触发
@@ -319,3 +320,8 @@ if __name__ == "__main__":
     print("风格变更判定:", json.dumps(rate_change(
         {"metrics": {"files_changed": 1, "lines_added": 5, "lines_removed": 2}},
         paths=["src/style/theme.scss"]), ensure_ascii=False))
+
+
+
+if __name__ == "__main__":
+    cdx_errors.guard(main)

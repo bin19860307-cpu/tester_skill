@@ -54,6 +54,7 @@ data JSON 结构：
   `-->` 会提前终止注释，剩余文本会以明文渲染在报告里（2026-09-18 实测缺陷）。
 """
 import argparse
+import cdx_errors  # 统一友好错误层
 import json
 import os
 import re
@@ -183,7 +184,7 @@ def main():
     ap.add_argument("--data-file", help="P1 用例 JSON 文件路径")
     args = ap.parse_args()
     if args.data_file:
-        data = json.load(open(args.data_file, encoding="utf-8"))
+        data = cdx_errors.read_json(args.data_file)
     elif args.data:
         data = json.loads(args.data)
     else:
@@ -192,7 +193,7 @@ def main():
     if not os.path.exists(args.report):
         print("ERROR: 报告不存在 %s" % args.report)
         sys.exit(1)
-    html = open(args.report, encoding="utf-8").read()
+    html = cdx_errors.read_text(args.report)
     frag = render(data)
     out = inject(html, frag)
     safe_write_report(args.report, out)
@@ -201,4 +202,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

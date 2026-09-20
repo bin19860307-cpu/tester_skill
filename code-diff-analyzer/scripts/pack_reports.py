@@ -26,6 +26,7 @@ pack_reports.py — 把本轮生成的 code-diff 报告打成「结构保真」�
       校验目标文件是否真实存在；有断链则以退出码 3 结束。
 """
 import argparse
+import cdx_errors  # 统一友好错误层
 import os
 import re
 import shutil
@@ -88,7 +89,7 @@ def verify_links(extract_dir: str, bundle: str, files: list) -> list:
             continue
         if not rel.endswith(".html"):
             continue
-        t = open(rp, encoding="utf-8").read()
+        t = cdx_errors.read_text(rp)
         for m in re.finditer(r'(?:href|src)="([^"#]+)"', t):
             target = m.group(1)
             if target.startswith(("http://", "https://", "data:", "mailto:", "javascript:")):
@@ -152,4 +153,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cdx_errors.guard(main))

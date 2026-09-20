@@ -38,6 +38,7 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import (  # noqa: E402
     norm_version, version_key, version_series, normalize_path,
     is_junk_path, is_logic_path, filter_change_files,
@@ -802,4 +803,4 @@ def _backfill_preview(service, analytics_root, report_root):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(cdx_errors.guard(main))

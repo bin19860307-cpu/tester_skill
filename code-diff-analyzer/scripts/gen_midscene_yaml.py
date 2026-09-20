@@ -22,6 +22,7 @@ gen_midscene_yaml.py
       --module 权益控制
 """
 import argparse
+import cdx_errors  # 统一友好错误层
 import json
 import os
 import re
@@ -102,8 +103,8 @@ def main():
     ap.add_argument('--module', default='权益控制')
     args = ap.parse_args()
 
-    with open(args.data_file, encoding='utf-8') as f:
-        data = json.load(f)
+    data = cdx_errors.read_json(args.data_file)
+
 
     os.makedirs(args.out_dir, exist_ok=True)
     count = 0
@@ -133,4 +134,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    cdx_errors.guard(main)

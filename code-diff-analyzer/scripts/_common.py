@@ -35,6 +35,7 @@ _common.py — Code Diff Analyzer · 共享基础模块
     from _common import is_junk_path, is_logic_path, filter_change_files
 """
 import json
+import cdx_errors  # 统一友好错误层
 import os
 import re
 import sys
@@ -403,7 +404,7 @@ def safe_write_report(path, html):
         f.write(html)
 
 
-if __name__ == "__main__":
+def main():
     # 自检：归一化 + 版本序 + 路径过滤
     cases = [
         ("business-5.3.0.2", "5.3.0.2"), ("v5.3.0.2", "5.3.0.2"),
@@ -423,3 +424,8 @@ if __name__ == "__main__":
     kept, dropped = filter_change_files(p)
     print("保留:", kept)
     print("排除:", dropped)
+
+
+
+if __name__ == "__main__":
+    cdx_errors.guard(main)

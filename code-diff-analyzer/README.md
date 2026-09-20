@@ -54,6 +54,7 @@ openpyxl>=3.1.0
 |---|---|
 | `scripts/bug_correlate.py` | Code Diff Analyzer · Flow A + Flow B 固化脚本 |
 | `scripts/bug_trend.py` | Code Diff Analyzer · Flow C.2 版本 Bug 趋势统计（固化脚本） |
+| `scripts/cdx_errors.py` | Code Diff Analyzer 统一错误提示层 |
 | `scripts/doctor.py` | diff — analytics 一键体检 / 修复 |
 | `scripts/gen_bug_predict.py` | 把「Bug 预测（缺陷倾向预判）」维度注入变更影响分析报告（幂等）。 |
 | `scripts/gen_combined_report.py` | Code Diff Analyzer · 综合比对分析报告（多服务） |
@@ -88,7 +89,7 @@ code-diff-analyzer/
 
 ## 版本
 
-当前 v1.1.1。
+当前 v1.1.2。
 
 ## 许可
 

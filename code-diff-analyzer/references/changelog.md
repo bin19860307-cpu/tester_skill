@@ -5,6 +5,12 @@
 
 > 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
 
+- **2026-09-20 · v1.1.2 · 重接 cdx_errors 统一友好错误层（护 SkillHub 可靠性评分）**
+  - 背景：v1.1.1 重生成发布时未沿用 2026-09-17 为护 SkillHub 可靠性 4.1 反馈所加的 `cdx_errors.py` 友好错误层（源文件被 `skill_publish_prep.py` 的 rmtree 清掉），本次重新接回 C 盘 v1.1.1 真源。
+  - 改动：① 全 15 个 CLI 脚本顶部 `import cdx_errors`，`__main__` 处统一 `cdx_errors.guard(main)` 顶层兜底（`scoring.py` / `_common.py` 的演示自检块改 `def main():` + guard 包裹）；② 把文件输入类脚本的裸 `json.load(open(...))` / `open(...).read()` / `openpyxl.load_workbook(...)` 替换为 `cdx_errors.read_json` / `read_text` / `open_xlsx`，对「文件不存在 / 非 UTF-8 / JSON 非法 / xlsx 打不开 / 缺字段」给出**指明文件路径、行列、成因与修复建议**的中文报错（退出码 1/2/3/4，加 `--debug` 或 `CDX_DEBUG=1` 打印完整堆栈）；③ 刻意保留 `load_json` 容错助手与 `_common` 的回退读取——它们本就设计为「缺失返回 None」，不改为致命错误以免破坏既有 fallback 语义。
+  - 收益：非开发用户遇到路径错/格式错不再看到 Python traceback，而是可读的中文定位；CI / 手动跑批失败时错误可解释、可排查。
+  - 验证：全部脚本 `py_compile` 通过；缺文件 → 退出码 3 并列出相近文件名，JSON 非法 → 退出码 4 并标注行列；`scoring.py` 演示自检仍正常退出 0。
+
 - **2026-09-20 · v1.1.1 · HTML 注释泄漏防护（模板源头修复 + 写盘守卫）**
   - 问题：用户截图反馈本轮报告（portal-backend 5.3.0.4→5.3.0.5）P1 用例预测标题下出现裸文本「）。 -->」。根因：`html-report-template.html` 两处指导性注释用了「（`<-- X_START/END -->`）。」嵌套写法，浏览器在嵌套的 `-->` 处**提前终止注释**，剩余文本以裸文本渲染。2026-09-18 修过同类泄漏，但只修了已生成报告、**模板源头漏修**，从模板重建报告时复现。
   - 修复：① 模板两处注释改为「X_START/END 标记对」文字表述（注释体内不再出现 `-->`）；② `_common.py` 新增 `scan_comment_leaks()`（扫描注释体内 `<--`/`--!>` 嵌套）与 `safe_write_report()`（**发现泄漏拒绝落盘并 SystemExit**）；③ 接入全部 5 个 HTML 写盘方（gen_p1_cases / gen_bug_predict / gen_quant_jit / bug_trend / gen_combined_report）；④ 新增回归 `tests/test_comment_leaks.py`（模板必须干净 + 扫描识别 + 拒绝落盘）。

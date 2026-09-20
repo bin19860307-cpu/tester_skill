@@ -46,6 +46,7 @@ pipeline_wrapper.py — Code Diff Analyzer 流水线统一入口（Phase 1 容�
 依赖：仅 Python 标准库（wrapper 本体）；子脚本 bug_correlate 需 openpyxl。
 """
 import argparse
+import cdx_errors  # 统一友好错误层
 import json
 import os
 import subprocess
@@ -260,4 +261,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

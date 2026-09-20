@@ -41,6 +41,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from quant_jit_risk import compute, generate_jit, auto_historical, CORE_PATTERNS  # noqa
 from scoring import derive_stats as derive_stats_from_metrics  # noqa
 from _common import norm_version, safe_write_report  # noqa
@@ -341,7 +342,7 @@ def derive_stats_for_combined(service, report_root):
     files = sorted(glob.glob(pat), key=os.path.getmtime, reverse=True)
     if not files:
         return None
-    return derive_stats_from_report(open(files[0], encoding="utf-8").read())
+    return derive_stats_from_report(cdx_errors.read_text(files[0]))
 
 
 # ============================================================
@@ -383,7 +384,7 @@ def stats_from_metrics(service, report_path, analytics_root):
     if not os.path.isfile(path):
         return None, "service_metrics.json 不存在：%s" % path
     try:
-        records = (json.load(open(path, encoding="utf-8")) or {}).get("records", [])
+        records = (cdx_errors.read_json(path) or {}).get("records", [])
     except Exception as e:
         return None, "service_metrics.json 解析失败：%s" % e
 
@@ -457,7 +458,7 @@ def main():
                      "增强10维" if "historical_metrics" in st else "静态5维"))
         if not rows:
             print("[ERROR] 未派生到任何服务量化数据"); sys.exit(1)
-        html = open(args.report, encoding="utf-8").read()
+        html = cdx_errors.read_text(args.report)
         out = inject_combined(html, render_combined_table(rows))
         safe_write_report(args.report, out)
         print("OK: 综合报告注入 %d 个服务量化/JIT 汇总" % len(rows))
@@ -466,11 +467,11 @@ def main():
     # —— 单服务 ——
     if not os.path.exists(args.report):
         print("ERROR: 报告不存在 %s" % args.report); sys.exit(1)
-    html = open(args.report, encoding="utf-8").read()
+    html = cdx_errors.read_text(args.report)
 
     stats = None
     if args.stats:
-        stats = json.load(open(args.stats, encoding="utf-8"))
+        stats = cdx_errors.read_json(args.stats)
     elif args.stats_json:
         stats = json.loads(args.stats_json)
 
@@ -509,4 +510,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

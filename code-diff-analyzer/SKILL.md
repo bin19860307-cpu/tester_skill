@@ -1,9 +1,8 @@
 ---
 name: code-diff-analyzer
-version: "1.1.1"
+version: "1.1.2"
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
-author: Chane
 description_zh: 代码变更影响分析技能。解析 git diff、tagdiff.txt、compare_vX_to_Y.md 等变更输入，识别受影响模块、评估风险等级、规划测试范围，支持自动生成 HTML 变更报告与多服务综合 Bug 趋势分析。
 description_en: Code diff impact analysis skill. Parse git diff / tagdiff.txt / compare_vX_to_Y.md, identify affected modules, assess risk, plan test scope, and auto-generate HTML change reports with combined multi-service bug-trend analysis.
 description: >

@@ -47,6 +47,7 @@ except ImportError:
 
 # 共享基础模块（版本键归一 + 路径过滤）—— 全技能唯一实现，避免口径漂移
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import (  # noqa: E402
     norm_version, version_key, version_series, same_version,
     inconsistent_keys, inconsistent_keys_by_source, filter_change_files,
@@ -170,7 +171,7 @@ def map_severity(raw):
 # 读取 + 规范化
 # ----------------------------------------------------------------------------
 def parse_xlsx(path):
-    wb = openpyxl.load_workbook(path, data_only=True)
+    wb = cdx_errors.open_xlsx(path)
     ws = wb["bug"] if "bug" in wb.sheetnames else wb.worksheets[0]
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -227,7 +228,7 @@ def detect_service(analytics_root, bug_versions):
         if not os.path.isfile(chain_path):
             continue
         try:
-            chain = json.load(open(chain_path, encoding="utf-8"))
+            chain = cdx_errors.read_json(chain_path)
         except Exception:
             continue
         known = {norm_version(v.get("version")) for v in chain.get("versions", [])}
@@ -312,7 +313,7 @@ def run_mapping_engine(service, analytics_root, bugs, verbose=True):
     all_chain_raw = []
     if os.path.isfile(chain_path):
         try:
-            chain = json.load(open(chain_path, encoding="utf-8"))
+            chain = cdx_errors.read_json(chain_path)
             for v in chain.get("versions", []):
                 ver = (v or {}).get("version")
                 if not ver:
@@ -329,7 +330,7 @@ def run_mapping_engine(service, analytics_root, bugs, verbose=True):
     records = []
     if os.path.isfile(metrics_path):
         try:
-            records = json.load(open(metrics_path, encoding="utf-8")).get("records", [])
+            records = cdx_errors.read_json(metrics_path).get("records", [])
         except Exception as e:
             print(f"[WARN] service_metrics.json 读取失败: {e}")
 
@@ -616,7 +617,7 @@ def main():
                     existing = []
                     if os.path.isfile(path):
                         try:
-                            existing = json.load(open(path, encoding="utf-8")).get("bugs", [])
+                            existing = cdx_errors.read_json(path).get("bugs", [])
                         except Exception:
                             existing = []
                     merged = {b["bug_id"]: b for b in existing}
@@ -678,7 +679,7 @@ def main():
     try:
         mp = os.path.join(svc_dir, "service_metrics.json")
         if os.path.isfile(mp):
-            metrics = json.load(open(mp, encoding="utf-8"))
+            metrics = cdx_errors.read_json(mp)
             ids = [b["bug_id"] for b in bugs if b.get("bug_id")]
             if ids:
                 for rec in metrics.get("records", []):
@@ -735,4 +736,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

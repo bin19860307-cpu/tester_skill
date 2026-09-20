@@ -37,6 +37,7 @@ from datetime import datetime
 
 import sys as _sys  # noqa: E402
 _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import load_bugs_doc, classify_bug_side, safe_write_report  # noqa: E402
 
 RISK_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
@@ -619,4 +620,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)

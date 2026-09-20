@@ -61,6 +61,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cdx_errors  # 统一友好错误层
 from _common import load_bugs_doc  # noqa: E402
 
 # ---------- 权重 ----------
@@ -307,7 +308,7 @@ def auto_historical(service, workspace, analytics_root=None):
         # ---- 修改频率：file_history 平均 change_count ----
         mod_count, n = 0.0, 0
         if os.path.exists(fh):
-            data = json.load(open(fh, encoding="utf-8"))
+            data = cdx_errors.read_json(fh)
             for v in extract_files(data).values():
                 mod_count += (v.get("change_count", 0) if isinstance(v, dict) else 0)
                 n += 1
@@ -332,7 +333,7 @@ def auto_historical(service, workspace, analytics_root=None):
         churn_rate = 0.0
         try:
             if os.path.exists(sm):
-                recs = json.load(open(sm, encoding="utf-8")).get("records", [])
+                recs = cdx_errors.read_json(sm).get("records", [])
                 if recs:
                     m = (recs[-1].get("metrics") or {})
                     fc = int(m.get("files_changed") or 0)
@@ -350,7 +351,7 @@ def auto_historical(service, workspace, analytics_root=None):
         days_since = 0
         try:
             if os.path.exists(vc):
-                vers = json.load(open(vc, encoding="utf-8")).get("versions", [])
+                vers = cdx_errors.read_json(vc).get("versions", [])
                 dates = [v.get("date") for v in vers if v.get("date")]
                 if dates:
                     from datetime import date as _date
@@ -390,7 +391,7 @@ def main():
     ap.add_argument("--service", help="服务名（尝试从 diff-analytics 自动补历史度量）")
     ap.add_argument("--workspace", help="工作区根目录（配合 --service）")
     args = ap.parse_args()
-    stats = json.load(open(args.stats, encoding="utf-8"))
+    stats = cdx_errors.read_json(args.stats)
     if args.service and args.workspace:
         h = auto_historical(args.service, args.workspace)
         if h and "historical_metrics" not in stats:
@@ -402,4 +403,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    cdx_errors.guard(main)
