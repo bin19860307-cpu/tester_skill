@@ -16,13 +16,18 @@ pipeline_wrapper.py — Code Diff Analyzer 流水线统一入口（Phase 1 容�
     不在流水线内做 LLM 推理，避免发布链路被 AI 延迟/成本拖累。
 
 分阶段执行（--stage）：
-    analyze  —— 准备工作区 + 可选 git 浅克隆 + 写运行元数据 + 交接校验
+    analyze  —— 准备工作区 + 可选 git 浅克隆 + 写运行元数据 + 交接校验（严格把关）
     score    —— bug_correlate(需 --xlsx) + bug_trend(需 version_bugs.json 已就绪)
     report   —— gen_combined_report(多服务) + gen_p1_cases 注入(可选 --p1-data-file)
-    all      —— score → report 链式执行（默认）
+    all      —— analyze → score → report 链式执行（默认）
+
+交接把关（analyze 阶段）：
+    默认【阻断】：若 service_metrics.json 未就绪，analyze 以退出码 2 结束，
+    用于 CI 门禁拦截「语义分析产物缺失却继续出报告」。
+    手动 / 开发场景可加 --allow-missing-metrics 豁免（降级为警告 + 退出码 0）。
 
 用法示例：
-    # 仅准备 + 校验（Jenkins 里先跑一次确认语义分析产物就绪）
+    # 仅准备 + 校验（CI 门禁：语义分析产物未就绪则退出码 2 拦截）
     python pipeline_wrapper.py --stage analyze --service portal-backend \
         --repo-url git@xxx/portal-backend.git --target-tag v1.1
 
@@ -32,8 +37,11 @@ pipeline_wrapper.py — Code Diff Analyzer 流水线统一入口（Phase 1 容�
     # 报告聚合 + P1 用例注入
     python pipeline_wrapper.py --stage report --services a b c --p1-data-file p1.json
 
-    # 一键全流程
+    # 一键全流程（analyze → score → report）
     python pipeline_wrapper.py --stage all --service portal-backend --xlsx bug.xlsx
+
+    # 手动 / 开发：产物缺失时不阻断
+    python pipeline_wrapper.py --stage all --service portal-backend --allow-missing-metrics
 
 依赖：仅 Python 标准库（wrapper 本体）；子脚本 bug_correlate 需 openpyxl。
 """
@@ -45,6 +53,10 @@ import sys
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# analyze 交接失败（语义分析产物缺失）专用退出码：与 1（参数错误）/ 子脚本退出码区分，
+# 便于 Jenkins / GitLab CI 用 returnCode==2 精准判定「前置语义分析未就绪」，而非笼统失败。
+EXIT_HANDOFF_MISSING = 2
 
 SCRIPTS = {
     "bug_correlate": os.path.join(HERE, "bug_correlate.py"),
@@ -129,10 +141,18 @@ def stage_analyze(args):
     metrics = os.path.join(analytics_root, args.service, "service_metrics.json")
     if os.path.isfile(metrics):
         print(f"[OK] service_metrics.json 已就绪，可进入 score 阶段")
+    elif args.allow_missing_metrics:
+        print("[HANDOFF] service_metrics.json 尚未生成。")
+        print("         语义分析（Step 1-7）由 LLM Agent 在 PR 前置阶段完成，")
+        print("         流水线只消费其结果。请先完成语义分析，产物落盘到上述 analytics 目录。")
+        print("[WARN] 已启用 --allow-missing-metrics 豁免，本次不阻断（退出码 0）。")
     else:
         print("[HANDOFF] service_metrics.json 尚未生成。")
         print("         语义分析（Step 1-7）由 LLM Agent 在 PR 前置阶段完成，")
         print("         流水线只消费其结果。请先完成语义分析，产物落盘到上述 analytics 目录。")
+        print(f"[FAIL] 交接未就绪，analyze 以退出码 {EXIT_HANDOFF_MISSING} 结束（CI 门禁应拦截）。")
+        print("       手动 / 开发场景可加 --allow-missing-metrics 豁免。")
+        sys.exit(EXIT_HANDOFF_MISSING)
 
 
 def stage_score(args):
@@ -151,9 +171,10 @@ def stage_score(args):
     else:
         print("[SKIP] 未提供 --xlsx，跳过 bug_correlate（Bug 关联）")
 
-    # 2) Bug 趋势（需 version_bugs.json 已就绪）
-    bugs_path = os.path.join(analytics_root, args.service, "version_bugs.json")
-    if os.path.isfile(bugs_path):
+    # 2) Bug 趋势（需 version_bugs.json 已就绪；服务级缺失时回退项目级池）
+    import _common  # noqa: E402  （同目录共享模块）
+    _doc, _scope = _common.load_bugs_doc(analytics_root, args.service)
+    if _doc:
         out = args.trend_out or os.path.join(
             report_root, args.service,
             f"{args.service}_bug趋势统计_{datetime.now().strftime('%Y%m%d')}.html")
@@ -161,7 +182,7 @@ def stage_score(args):
         run_py("bug_trend", "--service", args.service,
                "--analytics-root", analytics_root, "--out", out)
     else:
-        print("[SKIP] version_bugs.json 不存在，跳过 bug_trend（趋势统计）")
+        print("[SKIP] 服务级与项目级池均无 version_bugs.json，跳过 bug_trend（趋势统计）")
 
 
 def stage_report(args):
@@ -199,7 +220,7 @@ def main():
     )
     # 阶段
     ap.add_argument("--stage", choices=["analyze", "score", "report", "all"],
-                    default="all", help="执行阶段（默认 all=score→report）")
+                    default="all", help="执行阶段（默认 all=analyze→score→report）")
     # 服务
     ap.add_argument("--service", help="单服务名")
     ap.add_argument("--services", nargs="+", help="多服务名（综合报告用）")
@@ -213,6 +234,8 @@ def main():
     ap.add_argument("--repo-url", help="git 仓库地址（提供则浅克隆）")
     ap.add_argument("--clone-dir", help="克隆目标目录（缺省 {workspace}/src/{service}）")
     ap.add_argument("--git-depth", type=int, default=100, help="浅克隆历史深度（默认 100）")
+    ap.add_argument("--allow-missing-metrics", action="store_true",
+                    help="analyze 交接产物(service_metrics.json)缺失时不阻断（手动 / 开发豁免通道）")
     # score 阶段
     ap.add_argument("--xlsx", help="TAPD Bug 导出 Excel（bug_correlate 输入）")
     ap.add_argument("--trend-out", help="Bug 趋势报告输出路径（缺省自动生成）")
@@ -229,6 +252,7 @@ def main():
     elif args.stage == "report":
         stage_report(args)
     else:  # all
+        stage_analyze(args)
         stage_score(args)
         stage_report(args)
 

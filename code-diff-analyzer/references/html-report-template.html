@@ -629,14 +629,14 @@
 
     <!-- ===== Section: Bug 预测 & P1 用例合并（缺陷倾向预判 + 可执行用例，由 gen_bug_predict.py + gen_p1_cases.py 注入） ===== -->
     <!-- 生成报告后运行：python scripts/gen_bug_predict.py --report {本报告.html} --data-file bug_predict.json
-         Bug 预测片段（🐞 缺陷倾向预判 + P1↔Bug 映射）注入下方占位符；重复注入自动替换（<-- BUG_PREDICT_START/END -->）。 -->
+         Bug 预测片段（🐞 缺陷倾向预判 + P1↔Bug 映射）注入下方占位符；重复注入自动替换（BUG_PREDICT_START/END 标记对）。 -->
     <!-- BUG_PREDICT_SECTION -->
 
     <!-- ===== Section: P1 用例预测（基于影响范围，由 gen_p1_cases.py 注入） ===== -->
     <div class="section">
         <div class="section-title"><span class="icon">🎯</span> P1 用例预测（基于影响范围）</div>
         <!-- 生成报告后运行：python scripts/gen_p1_cases.py --report {本报告.html} --data {p1_cases.json}
-             卡片片段将注入下方占位符；重复注入自动替换（<-- P1_CASES_START/END -->）。 -->
+             卡片片段将注入下方占位符；重复注入自动替换（P1_CASES_START/END 标记对）。 -->
         <!-- P1_CASES_SECTION -->
     </div>
 

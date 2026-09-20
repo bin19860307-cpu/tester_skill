@@ -33,11 +33,11 @@ import json
 import os
 import re
 import glob
-import sys
 from datetime import datetime
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cdx_errors  # noqa: E402  统一错误提示层（含缺失的 sys 兜底）
+import sys as _sys  # noqa: E402
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _common import load_bugs_doc, classify_bug_side, safe_write_report  # noqa: E402
 
 RISK_RANK = {"high": 3, "medium": 2, "low": 1, None: 0}
 RISK_LABEL = {"high": "高", "medium": "中", "low": "低"}
@@ -105,8 +105,13 @@ def version_key(v):
 
 
 def load_json(path):
-    """读取 JSON：不存在→None（静默）；存在但格式异常→明确 WARN 并返回 None。"""
-    return cdx_errors.try_json(path)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +120,8 @@ def load_json(path):
 def load_service(service, analytics_root, report_root):
     svc_dir = os.path.join(analytics_root, service)
     metrics = load_json(os.path.join(svc_dir, "service_metrics.json"))
-    bugs_doc = load_json(os.path.join(svc_dir, "version_bugs.json"))
+    # 项目级 Bug 池回退：服务级缺失时读 _project/version_bugs.json（scope=project）
+    bugs_doc, bugs_scope = load_bugs_doc(analytics_root, service)
 
     # —— 最新版本对（去重：按 version_from+version_to）——
     latest = None
@@ -178,8 +184,21 @@ def load_service(service, analytics_root, report_root):
             bug_version["severity_by_found"][fv][sv] = bug_version["severity_by_found"][fv].get(sv, 0) + 1
 
     # —— 概念指纹（用于跨服务关联）——
-    bug_titles = [b.get("title", "") for b in (bugs_doc.get("bugs") if bugs_doc else [])]
+    # 2026-09-18 项目级池改造：项目池的 Bug 标题被所有服务共享，若纳入指纹，
+    # 会把「同一份 Bug 列表」误判成「跨服务概念关联」（实测 0→1 假关联）。
+    # 故 scope=project 时只用模块名做指纹，不并入 Bug 标题。
+    if (bugs_doc or {}).get("bugs") and bugs_scope == "service":
+        bug_titles = [b.get("title", "") for b in bugs_doc["bugs"]]
+    else:
+        bug_titles = []
     concepts = extract_concepts(module_names, bug_titles)
+
+    # —— 端归属预判分布（项目级口径下，让前端服务也能看到关联 Bug 构成）——
+    side_pre_dist = {}
+    if bugs_doc and bugs_doc.get("bugs"):
+        for b in bugs_doc["bugs"]:
+            side = b.get("side_pre") or classify_bug_side(b)[0]
+            side_pre_dist[side] = side_pre_dist.get(side, 0) + 1
 
     # —— 独立报告路径（最新一份 *_变更影响分析报告.html）——
     report_path = None
@@ -200,6 +219,8 @@ def load_service(service, analytics_root, report_root):
         "bug_links": bug_links,
         "bug_summary": bug_summary,
         "bug_version": bug_version,
+        "bugs_scope": bugs_scope or "service",
+        "side_pre_dist": side_pre_dist,
         "concepts": concepts,
         "module_names": module_names,
         "report_path": report_path,
@@ -273,6 +294,19 @@ def render_service_card(s, absolute=False):
         det_tags.append('<span style="color:#d93025">⚠ 循环依赖</span>')
     det_html = " ".join(det_tags) if det_tags else '<span style="color:#188038">无专项告警</span>'
 
+    # Bug 口径（2026-09-18 项目级池改造 / 2026-09-19 归口规则）：
+    #   项目级池 = 按提测版本整包关联，前后端共用同一份 Bug 列表。按用户决策，
+    #   Bug 数据归口到综合报告第 ⑤ 节（各版本 Bug 数据明细）统一展示；
+    #   此处摘要卡只做「指引」，不再重复铺开总数与端归属拆分，避免
+    #   每个服务卡都挂着同一个 49 造成「每个服务都有 49 个 Bug」的误读。
+    #   服务级（非项目池）仍保留原「关联 Bug」（metrics 记录的 bug_links）。
+    if s.get("bugs_scope") == "project":
+        bug_span = (f'<span>项目级 Bug：<b>{s["bug_summary"]["total"]}</b>'
+                    f'<span style="color:#5f6368;font-size:12px">'
+                    f'（前后端共用同一池；明细与前端/后端拆分见 ⑤）</span></span>')
+    else:
+        bug_span = f'<span>关联 Bug：<b>{len(s["bug_links"])}</b></span>'
+
     link = ""
     if s["report_path"]:
         # 跳转链接生成策略（2026-09-10 可移植化改造）：
@@ -307,7 +341,7 @@ def render_service_card(s, absolute=False):
         <span>变更文件：<b>{fc}</b></span>
         <span>新增 <span style="color:#188038">+{la}</span></span>
         <span>删除 <span style="color:#d93025">-{lr}</span></span>
-        <span>关联 Bug：<b>{len(s['bug_links'])}</b></span>
+        {bug_span}
       </div>
       <div style="font-size:13px;margin-bottom:8px">{det_html}</div>
       <div style="font-size:13px">{link}</div>
@@ -361,7 +395,27 @@ def render_bug_version_section(services):
         return ""
     blocks = []
     any_data = False
-    for s in services:
+    # 项目级池：所有服务共享同一份 Bug 池，只渲染一次，标「项目级」
+    data_services = [s for s in services
+                     if (s.get("bug_version", {}).get("found") or s.get("bug_version", {}).get("fixed"))]
+    project_mode = bool(data_services) and all(s.get("bugs_scope") == "project" for s in data_services)
+    # 项目级：所有服务共享同一份池 → 只渲染一次，且**只出一张精简汇总表**。
+    # （2026-09-18）原本渲染「产生版本 / 解决版本」两张表、每行还重复 20 字的
+    # 服务名标签，与同节上方 bug_trend 注入的「③ 版本维度明细」完全重复 → 展示冗长。
+    # 现改为单表（版本 / 发现 / 修复），标签用短名「项目级」。
+    if project_mode:
+        # 项目级：本节只保留 intro + bug_trend 注入的区块（其「③ 版本维度明细」
+        # 已含 版本/发现/修复/严重度/修复率/风险分 全量），不再另出汇总表重复渲染。
+        if not data_services[0].get("bug_version", {}).get("found"):
+            return ""
+        return f"""
+  <div class="section">
+    <h2>⑤ 各版本 Bug 数据明细</h2>
+    <p style="font-size:13px;color:#5f6368;margin-bottom:10px">Bug 采用<b>项目级关联口径</b>（按提测版本整包，含前后端全部缺陷，不区分、不归因到单一服务）。下表由 bug_trend.py 注入，含各版本发现/修复、严重度分布、修复率与风险分口径；单服务视角详见其独立报告。</p>
+    <!-- BUG_TREND_COMBINED -->
+  </div>"""
+    render_list = data_services
+    for s in render_list:
         bv = s.get("bug_version", {})
         if not bv.get("found") and not bv.get("fixed"):
             continue
@@ -397,10 +451,12 @@ def render_bug_version_section(services):
       </div>""")
     if not any_data:
         return ""
+    scope_hint = ("Bug 采用<b>项目级关联口径</b>（按提测版本整包，含前后端全部缺陷，"
+                  "不区分、不归因到单一服务）。" if project_mode else "下表按服务展示产生版本 / 解决版本分布。")
     return f"""
   <div class="section">
     <h2>⑤ 各版本 Bug 数据明细</h2>
-    <p style="font-size:13px;color:#5f6368;margin-bottom:10px">综合报告含 ≥2 服务时汇总各版本 Bug 数据（单服务详见其独立报告）。下表按服务展示产生版本 / 解决版本分布。</p>
+    <p style="font-size:13px;color:#5f6368;margin-bottom:10px">综合报告含 ≥2 服务时汇总各版本 Bug 数据（单服务详见其独立报告）。{scope_hint}</p>
     <!-- BUG_TREND_COMBINED -->
     {''.join(blocks)}
   </div>"""
@@ -412,9 +468,16 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
     OUT_DIR = os.path.dirname(out_path)
     # 综合总览
     total_files = sum(s["metrics"].get("files_changed", 0) or 0 for s in services)
-    total_bugs = sum(s["bug_summary"]["total"] for s in services)
-    total_closed = sum(s["bug_summary"]["closed"] for s in services)
-    total_resolved = sum(s["bug_summary"]["resolved"] for s in services)
+    # 项目级池时 Bug 汇总只取一次（所有服务共享同一池，求和会重复计数）
+    bug_data = [s for s in services if s["bug_summary"]["total"]]
+    if bug_data and all(s.get("bugs_scope") == "project" for s in bug_data):
+        pool_sum = bug_data[0]["bug_summary"]
+        total_bugs, total_closed, total_resolved = (
+            pool_sum["total"], pool_sum["closed"], pool_sum["resolved"])
+    else:
+        total_bugs = sum(s["bug_summary"]["total"] for s in services)
+        total_closed = sum(s["bug_summary"]["closed"] for s in services)
+        total_resolved = sum(s["bug_summary"]["resolved"] for s in services)
     versions = sorted({s["version_to"] for s in services if s["version_to"]}, key=version_key)
     batch = "、".join(versions) if versions else "—"
 
@@ -423,7 +486,7 @@ def render_combined_html(services, cross_links, combined_risk, cascade, out_path
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{len(services)}</div><div style="color:#5f6368;font-size:13px">涉及服务</div></div>
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{batch}</div><div style="color:#5f6368;font-size:13px">版本批次</div></div>
       <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_files}</div><div style="color:#5f6368;font-size:13px">总变更文件</div></div>
-      <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_bugs}</div><div style="color:#5f6368;font-size:13px">总关联 Bug（已关闭 {total_closed} / 已解决 {total_resolved}）</div></div>
+      <div style="flex:1;min-width:140px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:14px"><div style="font-size:24px;font-weight:700">{total_bugs}</div><div style="color:#5f6368;font-size:13px">{'项目级 Bug' if (bug_data and all(s.get('bugs_scope')=='project' for s in bug_data)) else '总关联 Bug'}（已关闭 {total_closed} / 已解决 {total_resolved}）</div></div>
     </div>"""
 
     version_matrix_rows = "".join(
@@ -532,16 +595,13 @@ def main():
     services = []
     for svc in args.services:
         if not os.path.isdir(os.path.join(analytics_root, svc)):
-            cdx_errors.warn("跳过未找到 analytics 目录的服务: %s（期望目录 %s）"
-                            % (svc, os.path.join(analytics_root, svc)))
+            sys.stderr.write(f"[WARN] 跳过未找到 analytics 的服务: {svc}\n")
             continue
         services.append(load_service(svc, analytics_root, report_root))
 
     if not services:
-        cdx_errors.die("未加载到任何有效服务数据",
-                       "参与服务: %s\nanalytics 根目录: %s" % (", ".join(args.services), analytics_root),
-                       hint="先对各服务运行单服务分析（生成 service_metrics.json），或核对 --analytics-root。",
-                       code=4)
+        sys.stderr.write("[ERROR] 未加载到任何有效服务数据，请先对各服务运行单服务分析。\n")
+        raise SystemExit(1)
 
     cross_links = find_cross_links(services)
     combined_risk, cascade = aggregate_risk(services, cross_links)
@@ -551,8 +611,7 @@ def main():
         f"综合比对分析报告_{'_'.join(s['service'] for s in services)}_{datetime.now().strftime('%Y%m%d')}.html"
     )
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(render_combined_html(services, cross_links, combined_risk, cascade, out, args.absolute))
+    safe_write_report(out, render_combined_html(services, cross_links, combined_risk, cascade, out, args.absolute))
 
     print(f"[OK] 综合比对报告已生成: {out}")
     print(f"     服务数={len(services)} 综合风险={RISK_LABEL.get(combined_risk, combined_risk)}"
@@ -560,4 +619,4 @@ def main():
 
 
 if __name__ == "__main__":
-    cdx_errors.guard(main)
+    main()

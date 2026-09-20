@@ -54,16 +54,22 @@ openpyxl>=3.1.0
 |---|---|
 | `scripts/bug_correlate.py` | Code Diff Analyzer · Flow A + Flow B 固化脚本 |
 | `scripts/bug_trend.py` | Code Diff Analyzer · Flow C.2 版本 Bug 趋势统计（固化脚本） |
+| `scripts/doctor.py` | diff — analytics 一键体检 / 修复 |
 | `scripts/gen_bug_predict.py` | 把「Bug 预测（缺陷倾向预判）」维度注入变更影响分析报告（幂等）。 |
 | `scripts/gen_combined_report.py` | Code Diff Analyzer · 综合比对分析报告（多服务） |
 | `scripts/gen_midscene_yaml.py` | — |
 | `scripts/gen_p1_cases.py` | 把结构化 P1 用例预测注入单服务/综合报告（幂等）。 |
 | `scripts/gen_quant_jit.py` | 把量化风险评分 + JIT 缺陷预测 注入报告（幂等）。apex 能力整合。 |
+| `scripts/pack_reports.py` | 把本轮生成的 code — diff 报告打成「结构保真」的可分享 zip。 |
 | `scripts/pipeline_wrapper.py` | Code Diff Analyzer 流水线统一入口（Phase 1 容器化） |
 | `scripts/quant_jit_risk.py` | 量化风险评分 + JIT 缺陷预测 计算引擎（apex — diff-analyzer 能力整合版） |
+| `scripts/scoring.py` | Code Diff Analyzer · 统一口径模块（单一真源） |
+| `scripts/sync_analytics.py` | 数据沉淀确定性重建 + 完整性自检 |
+| `scripts/verify_precision.py` | 用真实命中率校准评分权重（把「规则引擎」升级为「项目校准模型」） |
 
 ## 参考资源
 - `references/analytics-schema.md`
+- `references/changelog.md`
 - `references/html-report-template.html`
 - `references/init-analytics.md`
 - `references/output-examples.md`
@@ -82,7 +88,7 @@ code-diff-analyzer/
 
 ## 版本
 
-当前 v1.0.4。
+当前 v1.1.1。
 
 ## 许可
 

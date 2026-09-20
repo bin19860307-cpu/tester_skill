@@ -28,6 +28,8 @@ data JSON 结构（见 bug_predict_52015_52016.json 样例）：
 - 片段以 <!-- BUG_PREDICT_START --> ... <!-- BUG_PREDICT_END --> 包裹，重复注入自动替换（幂等）。
 - 优先替换模板占位符 <!-- BUG_PREDICT_SECTION -->；
 - 若报告无占位符，则插入到 「P1 用例预测」章节注释之前（即 P1 块之前）。
+- ⚠️ HTML 注释内禁止出现 `-->`（含 `<-- X_START/END -->` 这类写法）：注释内第一个
+  `-->` 会提前终止注释，剩余文本（如 `）。 -->`）会以明文渲染在报告里（2026-09-18 实测缺陷）。
 """
 
 import argparse
@@ -36,8 +38,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cdx_errors  # noqa: E402  统一错误提示层
+from _common import safe_write_report  # noqa: E402
 
 START = "<!-- BUG_PREDICT_START -->"
 END = "<!-- BUG_PREDICT_END -->"
@@ -169,6 +170,15 @@ def inject(html, fragment):
         return html.replace(PLACEHOLDER, fragment)
     if P1_MARKER in html:
         return html.replace(P1_MARKER, fragment + "\n\n    " + P1_MARKER, 1)
+    return _insert_before_document_end(html, fragment)
+
+
+def _insert_before_document_end(html, fragment):
+    """把注入块放在文档闭合标签前，禁止生成 `</html>` 后的游离内容。"""
+    if re.search(r"</body\s*>", html, flags=re.I):
+        return re.sub(r"</body\s*>", fragment + "\n</body>", html, count=1, flags=re.I)
+    if re.search(r"</html\s*>", html, flags=re.I):
+        return re.sub(r"</html\s*>", fragment + "\n</html>", html, count=1, flags=re.I)
     return html + "\n" + fragment
 
 
@@ -241,7 +251,7 @@ def inject_combined(html, fragment):
     if "<!-- QUANT_JIT_COMBINED -->" in html:
         return html.replace("<!-- QUANT_JIT_COMBINED -->",
                             "<!-- QUANT_JIT_COMBINED -->\n\n" + fragment, 1)
-    return html + "\n" + fragment
+    return _insert_before_document_end(html, fragment)
 
 
 def main():
@@ -253,13 +263,16 @@ def main():
     ap.add_argument("--services", nargs="+", help="综合模式：服务名列表（与 --combined 配合）")
     ap.add_argument("--workspace", default=r"d:/workbuddy/测试日常", help="工作区根目录（综合模式取 report/code-diff 下数据）")
     args = ap.parse_args()
-    html = cdx_errors.read_text(args.report, "目标报告 HTML（--report）",
-                                hint="先由上游生成报告 HTML，再注入 Bug 预测。")
+    if not os.path.exists(args.report):
+        print("ERROR: 报告不存在 %s" % args.report)
+        sys.exit(1)
+    html = open(args.report, encoding="utf-8").read()
 
     if args.combined:
         report_root = os.path.join(args.workspace, "report", "code-diff")
         if not args.services:
-            cdx_errors.die("--combined 需配合 --services", hint="例：--combined --services a b c", code=2)
+            print("ERROR: --combined 需配合 --services")
+            sys.exit(1)
         svc_data = []
         missing = []
         for svc in args.services:
@@ -267,33 +280,32 @@ def main():
             if not p:
                 missing.append(svc)
                 continue
-            svc_data.append((svc, cdx_errors.read_json(p, "bug_predict（%s）" % svc)))
+            svc_data.append((svc, json.load(open(p, encoding="utf-8"))))
         if missing:
-            cdx_errors.warn("以下服务无 bug_predict*.json，已跳过：%s" % ", ".join(missing))
+            sys.stderr.write("[WARN] 以下服务无 bug_predict*.json，已跳过：%s\n" % ", ".join(missing))
         if not svc_data:
-            cdx_errors.die("无任何服务含 bug_predict 数据",
-                           "服务: %s\n查找根目录: %s" % (", ".join(args.services), report_root),
-                           hint="确认已生成各服务的 bug_predict*.json。", code=4)
+            print("ERROR: 无任何服务含 bug_predict 数据，无法生成汇总")
+            sys.exit(1)
         frag = render_combined(svc_data)
         out = inject_combined(html, frag)
-        open(args.report, "w",  encoding="utf-8").write(out)
+        safe_write_report(args.report, out)
         print("OK: 注入 %d 个服务的 Bug 预测汇总（综合报告）→ %s" % (len(svc_data), args.report))
         return
 
     # 单服务模式
     if args.data_file:
-        data = cdx_errors.read_json(args.data_file, "Bug 预测 JSON（--data-file）")
+        data = json.load(open(args.data_file, encoding="utf-8"))
     elif args.data:
-        data = cdx_errors.parse_json_arg(args.data, "Bug 预测 JSON（--data）")
+        data = json.loads(args.data)
     else:
-        cdx_errors.die("缺少 Bug 预测数据（单服务模式）",
-                       hint="提供 --data-file <路径> 或 --data '<JSON>'。", code=2)
+        print("ERROR: 需提供 --data 或 --data-file（单服务模式）")
+        sys.exit(1)
     frag = render(data)
     out = inject(html, frag)
-    open(args.report, "w", encoding="utf-8").write(out)
+    safe_write_report(args.report, out)
     print("OK: 注入 %d 条 Bug 预测（H1/H2/H3）+ P1 映射表 到 %s"
           % (len(data.get("items", [])), args.report))
 
 
 if __name__ == "__main__":
-    cdx_errors.guard(main)
+    main()

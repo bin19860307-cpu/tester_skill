@@ -10,8 +10,9 @@ gen_p1_cases.py — 把结构化 P1 用例预测注入单服务/综合报告（�
 data JSON 结构：
 {
   "kb_check": {
-    "kb_location": "知识库用例集路径（位于 v5.2 对应模块，如 .../测试用例/v5.2/权益控制/用例/全量测试用例.md）",
-    "note": "逐条核对结论（由 AI 填写，例如：已按修改内容定位到 v5.2/权益控制 用例集，P1-02/P1-03 命中既有用例，其余为新增场景预估）",
+    "target_version": "5.3",
+    "kb_location": "知识库用例集路径（如 .../初发项目/v5.3/03-测试用例/权益控制/权益控制_v5.3_测试用例.md）",
+    "note": "逐条核对结论（由 AI 填写，例如：已按修改内容定位到 v5.3/权益控制 用例集，P1-02/P1-03 命中既有用例，其余为新增场景预估）",
     "hit_count": 2,            # 命中知识库既有用例的条数
     "est_count": 7             # 未命中、需新增的预估用例条数
   },
@@ -38,7 +39,7 @@ data JSON 结构：
 知识库命中核对规则（用户 2026-08-14 明确）：
 - 所有服务都基于「教学管理域」；用例集按【版本】划分，每轮提测按当前分析的「目标版本」动态确定要核对的用例集版本（并非固定 v5.2）。
 - 确定版本后，按【修改内容】去该版本对应模块定位用例集：
-    D:/Obsidian知识库/knowledge/测试用例/v{目标版本}/{对应模块}/用例/全量测试用例.md
+    D:/Obsidian知识库/knowledge/初发项目/v{目标版本}/03-测试用例/{对应模块}/{模块}_v{目标版本}_测试用例.md
 - 逐条核对每条 P1 用例：
     · 命中既有用例 → 填 kb_ref（关联的编号），卡片显示绿色「✅ 已命中·关联 XXX」
     · 未命中（新增场景） → 设 estimated:true，卡片显示红色「预估」
@@ -47,7 +48,10 @@ data JSON 结构：
 注入规则：
 - 片段以 <!-- P1_CASES_START --> ... <!-- P1_CASES_END --> 包裹，重复注入自动替换（幂等）。
 - 优先替换模板占位符 <!-- P1_CASES_SECTION -->；若报告无占位符（旧报告），
-  则插入到「开发者建议」章节之前。
+  则插入到「开发者建议」章节之前；再找不到锚点时，生成完整章节并插入
+  `</body>` 前，绝不追加到 `</html>` 之后。
+- ⚠️ HTML 注释内禁止出现 `-->`（含 `<-- X_START/END -->` 这类写法）：注释内第一个
+  `-->` 会提前终止注释，剩余文本会以明文渲染在报告里（2026-09-18 实测缺陷）。
 """
 import argparse
 import json
@@ -55,8 +59,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import cdx_errors  # noqa: E402  统一错误提示层
+from _common import safe_write_report  # noqa: E402
 
 START = "<!-- P1_CASES_START -->"
 END = "<!-- P1_CASES_END -->"
@@ -102,14 +105,20 @@ def render_case(c):
 def render_kb(kb):
     loc = kb.get("kb_location", "")
     note = kb.get("note", "")
+    version = str(kb.get("target_version") or kb.get("version") or "").strip()
+    if not version and loc:
+        match = re.search(r"(?:^|[/\\])v?(\d+(?:\.\d+)+)(?:[/\\]|$)", loc)
+        if match:
+            version = match.group(1)
+    version_label = "v" + version.lstrip("vV") if version else "目标版本"
     hit = kb.get("hit_count", 0)
     est = kb.get("est_count", 0)
     stat = ""
     if hit or est:
         stat = "<br>&nbsp;&nbsp;• 逐条核对：命中 <b>%s</b> 条（关联既有用例集，可直接复用） / 预估 <b>%s</b> 条（新增场景）" % (hit, est)
-    return ("<div class='p1-kb hit'>📚 <b>知识库用例集核对</b>：已按修改内容定位到 v5.2 用例集。<br>"
+    return ("<div class='p1-kb hit'>📚 <b>知识库用例集核对</b>：已按修改内容定位到 %s 用例集。<br>"
             "&nbsp;&nbsp;• 用例集位置：%s<br>"
-            "&nbsp;&nbsp;• 核对结论：%s%s</div>") % (esc(loc), esc(note), stat)
+            "&nbsp;&nbsp;• 核对结论：%s%s</div>") % (esc(version_label), esc(loc), esc(note), stat)
 
 
 def render(data):
@@ -146,7 +155,25 @@ def inject(html, fragment):
         return html.replace(PLACEHOLDER, fragment)
     if DEV_MARKER in html:
         return html.replace(DEV_MARKER, fragment + "\n\n    " + DEV_MARKER, 1)
-    return html + "\n" + fragment
+
+    # 无模板锚点时生成自包含章节。START/END 包住整个章节，保证重复运行时
+    # 不会遗留空壳标题或重复容器。
+    inner = fragment
+    if inner.startswith(START):
+        inner = inner[len(START):]
+    if inner.rstrip().endswith(END):
+        inner = inner.rstrip()[:-len(END)]
+    fallback = (
+        START + "\n"
+        '<section class="section p1-section">\n'
+        '<h2>🎯 P1 用例预测（基于影响范围）</h2>\n'
+        + inner.strip() + "\n</section>\n" + END
+    )
+    if re.search(r"</body\s*>", html, flags=re.I):
+        return re.sub(r"</body\s*>", fallback + "\n</body>", html, count=1, flags=re.I)
+    if re.search(r"</html\s*>", html, flags=re.I):
+        return re.sub(r"</html\s*>", fallback + "\n</html>", html, count=1, flags=re.I)
+    return html + "\n" + fallback
 
 
 def main():
@@ -156,23 +183,22 @@ def main():
     ap.add_argument("--data-file", help="P1 用例 JSON 文件路径")
     args = ap.parse_args()
     if args.data_file:
-        data = cdx_errors.read_json(args.data_file, "P1 用例 JSON（--data-file）")
+        data = json.load(open(args.data_file, encoding="utf-8"))
     elif args.data:
-        data = cdx_errors.parse_json_arg(args.data, "P1 用例 JSON（--data）")
+        data = json.loads(args.data)
     else:
-        cdx_errors.die("缺少 P1 用例数据", hint="提供 --data-file <路径> 或 --data '<JSON>'。", code=2)
-    if not isinstance(data, dict):
-        cdx_errors.die("P1 用例 JSON 顶层结构不是对象",
-                       "实际类型: %s" % type(data).__name__,
-                       hint='期望形如 {"groups":[{"cases":[...]}]} 的对象。', code=4)
-    html = cdx_errors.read_text(args.report, "目标报告 HTML（--report）",
-                                hint="先由上游生成报告 HTML，再注入 P1 用例。")
+        print("ERROR: 需提供 --data 或 --data-file")
+        sys.exit(1)
+    if not os.path.exists(args.report):
+        print("ERROR: 报告不存在 %s" % args.report)
+        sys.exit(1)
+    html = open(args.report, encoding="utf-8").read()
     frag = render(data)
     out = inject(html, frag)
-    open(args.report, "w", encoding="utf-8").write(out)
+    safe_write_report(args.report, out)
     n = sum(len(g.get("cases", [])) for g in data.get("groups", []))
     print("OK: 注入 %d 条 P1 用例（%d 组）到 %s" % (n, len(data.get("groups", [])), args.report))
 
 
 if __name__ == "__main__":
-    cdx_errors.guard(main)
+    main()

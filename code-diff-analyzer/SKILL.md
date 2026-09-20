@@ -1,6 +1,6 @@
 ---
 name: code-diff-analyzer
-version: 1.0.4
+version: "1.1.1"
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
 author: Chane
@@ -15,48 +15,18 @@ description: >
   支持区分「新增代码」和「变更代码」两类变更进行分别分析，并可自动生成HTML格式的变更报告。
 ---
 
+
 # Code Diff Analyzer — 代码变更影响分析
 
 ## 技能概述
 
 分析代码仓库的变更记录（diff/PR/commit log），识别受影响的功能模块，评估风险等级，输出结构化的影响分析报告和测试建议。支持自动生成 HTML 格式的变更报告文件。
 
-## 技能更新记录（变更日志）
+## 变更记录
 
-> 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
-
-- **2026-09-17 · 错误提示友好化（统一层 cdx_errors）+ 版本升至 1.0.4**
-  - 根因：SkillHub 评审反馈「文件路径错误或数据格式不匹配时，可能会给出让人摸不着头脑的错误提示」。此前沿用 `json.load(open(path))` / `openpyxl.load_workbook(path)` / `open(path).read()`，失败时抛原生 traceback（FileNotFoundError / JSONDecodeError / KeyError / InvalidFileException），非开发用户不可读；且多处 `except: pass` 静默吞错。
-  - 新增 `scripts/cdx_errors.py`（纯标准库）统一错误层：`die / require_file / read_text / read_json / try_json / parse_json_arg / open_xlsx / check_headers / guard`；把失败转为「问题文件 + 原因 + 修复建议」中文块。
-  - 8 个脚本全部接线 `import cdx_errors` + 用友好读取代裸读 + 末行 `cdx_errors.guard(main)` 顶层兜底（`--debug` / `CDX_DEBUG=1` 打印完整堆栈）。
-  - 顺带修真实缺陷：`bug_trend.py` / `gen_combined_report.py` 错误分支用 `sys.stderr.write` 却**漏 `import sys`**，命中错误路径会 `NameError`；`bug_correlate.py` 顶层 eager `import openpyxl` 会先于「文件不存在」报错——改为 lazy import，使「文件路径错误」优先报文件问题。
-  - `Dockerfile` 补 `COPY cdx_errors.py ./`（避免镜像 ImportError）。
-  - 退出码约定：1 未预期 / 2 参数依赖 / 3 输入文件 / 4 数据格式。版本 1.0.3 → 1.0.4。
-- **2026-09-17 · 投稿包合规修正 + 版本升至 1.0.3**
-  - 平台投稿 zip 按文件类型白名单校验：剔除各 skill 自带 `.gitignore`；无扩展名文件补 `.txt`（`LICENSE`→`LICENSE.txt`、`scripts/Dockerfile`→`Dockerfile.txt`）。
-  - 统一用 `build_upload_zip.py` 重打包；版本 1.0.2 → 1.0.3（规避平台「重投版本须 > 已记录」红线）。
-- **2026-09-16 · 综合报告新增「各版本 Bug 数据明细」+ 状态口径修正 + 版本柱状图条件注入**
-  - `gen_combined_report.py`：新增 ⑤ 各版本 Bug 数据明细 节，**仅当综合报告含 ≥2 服务时展示**（单服务 Bug 数据见其独立报告，呼应「除非只有一个服务」）；按服务展示「产生版本 / 解决版本」分布 + 严重度分布（数据来自各服务 `version_bugs.json` 的 `found_in_version` / `fixed_in_version`）。原 ⑤ 综合发布建议顺延为 ⑥。⑤ 节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，供综合柱状图注入。
-  - 综合总览「总关联 Bug」口径改为 **已关闭 X / 已解决 Y**（不再把 `已解决` 计入 `已关闭`）。
-  - `bug_correlate.py`：修正状态映射——`STATUS_CLOSED` 仅含 `已关闭/关闭`，`已解决` 单列 `resolved`（此前 `已解决` 被误并入 `closed`，导致综合报告「已关闭 23」虚高；实际为 已关闭 6 / 已解决 17）；另补充 `轻微 → low` 严重度映射（此前 `轻微` 落入默认 medium，与 `一般` 同级，语义错误）。
-  - `bug_trend.py`：**新增综合模式 `--combined --services A B C --report <综合.html>`**——`build_stats_combined()` 跨服务聚合各 `version_bugs.json` 的「版本堆叠柱状图 + 修复率 + 明细」，经 `<!-- BUG_TREND_COMBINED -->` 占位符幂等注入综合报告。由此实现**条件注入**：综合报告注入「综合跨服务」聚合图，单服务报告注入该服务独立图（用户原话「综合就综合注入，单服务就单服务注入」）。修复率口径统一为「已关闭 + 已解决」占比，卡片显示 `已关闭 / 已解决` 双数。
-  - 已端到端验证：综合柱状图成功注入 ⑤ 节（2 个 SVG，幂等可重跑）、单服务 `bug_trend` 刷新数据后一致；综合报告 0 绝对链接、3 相对链接、单 `</html>`。
-- **2026-09-10 · Bug 版本系列隔离 + 知识库定位校正**
-  - `bug_correlate.py`：`--version` + 版本系列隔离（schema 1.0→1.1）。仅保留目标系列 Bug，其余归档 `_archive/version_bugs_{系列}.json`；顺带回填 `service_metrics.json` 的 `bug_links`（修复摘要卡「关联 Bug」恒为 0）。
-  - `SKILL.md`：修正知识库用例集路径为 `初发项目/v{版本}/03-测试用例/`；补充 P1 块落位、lock 文件排除、跨服务关联脆弱性等实测坑。
-  - 设计原则新增：**Bug 数据按版本走**，分析 5.3 不应混入 5.2 历史（用户反馈：版本噪音会虚高趋势）。
-- **2026-09-10 · 综合报告跳转链接可移植化（相对路径）**
-  - `gen_combined_report.py`：独立报告链接默认改为【相对路径】（如 `../portal-backend/xxx.html`）。综合报告在 `_综合/`、服务报告在 `{service}/`，二者同级，整目录拷贝到任意机器后直接双击即可点击跳转，解决「发给同事打不开」的问题。
-  - 新增 `--absolute` 开关回退旧的绝对 `file:///d:/...` 路径（仅本地预览用，不可分享）。
-  - 已验证：生成报告输出 0 条绝对链接、3 条相对链接且全部可解析；既有 `_综合` 报告与 `code-diff-portable.zip` 已就地改写为相对链接。
-- **2026-08-21 · Bug 预测合并呈现**
-  - `gen_bug_predict.py`：缺陷倾向预判（H1/H2/H3）与 P1 用例合并进回归用例集，形成「要测什么 / 可能出什么 Bug」互补双维度。
-- **2026-08-18 · 量化风险评分 + JIT 缺陷预测整合**
-  - `gen_quant_jit.py` / `quant_jit_risk.py`：风险从「高/中/低」升级为「分数(0-100)+JIT 预测」，默认每次都跑，小 diff 但语义关键时更能暴露风险。
-- **2026-08-13 · 综合报告跳转链接修复**
-  - `gen_combined_report.py`：独立报告链接去掉 `target` 属性（WorkBuddy 预览器拦截 file:// 所致）。
-- **2026-04-28 · 格式 A v2**
-  - Jenkins `tagdiff.sh v2` 新增变更概览 / 下一层模块分布 / 文件级差异统计分区，解析锚点不变。
+历史设计决策与修复记录已迁移到 [references/changelog.md](references/changelog.md)。
+仅在排查历史口径、回归原因或维护脚本时读取；普通 diff 分析无需加载。
+后续实质改动追加到该文件，`SKILL.md` 只保留当前有效规则。
 
 ## 触发条件
 
@@ -320,30 +290,48 @@ Commit 时间线：{最早日期} ~ {最晚日期}
 | 🟡 中 | 涉及路由配置/公共工具函数/多处引用的常量/新增复杂功能 |
 | 🟢 低 | 仅影响单一页面/纯视觉样式/文案修改/版本号更新 |
 
-#### 5.1 风险评估增强规则
+#### 5.1 风险评估增强规则（已固化为确定性代码，不再靠现场判断）
 
-**问题**：仅依赖路径关键词容易误判。
+> **2026-09-18 起**：本节规则已下沉到 `scripts/scoring.py` 的 `rate_change()`。
+> 原先这里是伪代码（`changesAuthCoreLogic(diff)` 等函数**代码里并不存在**），
+> 实际全靠 LLM 现场判断 → 同一份 diff 两次分析可能给出不同等级。
+> **现在：agent 调用脚本取结果，不再自行判定风险等级。**
 
-**增强判断逻辑**：
-
-```javascript
-// 伪代码规则，实际在 prompt 中体现
-if (changesAuthCoreLogic(diff)) risk = "🔴 高";      // 认证核心逻辑
-else if (changesPaymentFlow(diff)) risk = "🔴 高";    // 支付流程
-else if (changesCoreRoute(diff)) risk = "🔴 高";      // 核心路由
-else if (isDataFormatChange(diff)) risk = "🔴 高";    // 数据格式变更
-else if (changesRouteConfig(diff)) risk = "🟡 中";    // 路由配置
-else if (isPublicUtils(diff)) risk = "🟡 中";         // 公共工具
-else if (isComplexNewFeature(diff)) risk = "🟡 中";   // 复杂新功能
-else if (isStyleOnly(diff)) risk = "🟢 低";            // 仅样式
-else if (isDocOnly(diff)) risk = "🟢 低";             // 仅文档
-else risk = "🟢 低";                                  // 默认低风险
+```bash
+python scripts/scoring.py          # 自检输出：量化分 + 评级 + 评级理由
 ```
 
-**上下文增强**：
+规则（按优先级，命中即返回，全部可复现；版本号写在 `rating_rules_version`，当前 **1.1**）：
+
+| 规则 | 命中条件 | 结果 |
+|------|----------|------|
+| R1 | 触及认证/权限/支付/订单核心逻辑（`_AUTH_CORE_RE`） | 🔴 高 |
+| R2 | 命中数据格式/协议/契约变更（proto / dto / schema / sql / locale zh·en.json） | 🔴 高 |
+| R3 | 变更规模大：> **400** 行 或 > **10** 文件 | 🔴 高 |
+| R4 | 高风险模块**占比 ≥ 1/3 且数量 ≥ 2** | 🔴 高 |
+| R5 | 变更规模中等：> **150** 行 或 > **5** 文件 | 🟡 中 |
+| R6 | 存在高风险模块（数量 ≥ 1，但未达 R4 门槛） | 🟡 中 |
+| R7 | 仅涉及样式/文案（`*.css/scss/svg`、theme/token/palette） | 🟢 低 |
+| — | 其余 | 🟢 低 |
+
+> **阈值重标定说明（rules 1.0 → 1.1，2026-09-18）**：1.0 的 R3 是「>200 行 或 >5 文件」，
+> R4 是「存在高风险模块（`high_risk > 0`）」——实测这两条**几乎无差别触发**，8 条记录里
+> 7 条判 🔴 高，评级失去区分度。反例：`manage-frontend 5.3.0.7→5.3.0.8`
+> （6 文件 / 44 行 / 高风险模块 0 个）与 `trufar-landing-page 1.0.9→1.0.10`
+> （7 文件 / 37 行 / 高风险模块 0 个），唯一命中的都是「文件数 > 5」。
+> 改法：① 规模阈值统一到 `quant_jit_risk` **已公开**的那一套（400 行 / 10 文件 / 5 文件），
+> 同一件事不再两套阈值；② R4 由「存在」改为「占比」——「有 1 个高风险模块」不等于
+> 「整个区间高风险」。重算后分布为 **高 4 / 中 3 / 低 1**（原 7/1/0），每条都能指到具体规则。
+
+**上下文增强**（仍需 agent 补充叙事，但不得覆盖脚本结论）：
 - 不仅看路径，还要看变更内容本身
-- 如 `auth/helper.ts` 新增了一个工具函数 → 低风险
-- 如 `auth/service.ts` 修改了验证逻辑 → 高风险
+- 如 `auth/helper.ts` 新增了一个工具函数 → 可在报告中说明「虽命中 R1 但实为工具函数」
+- 如 `auth/service.ts` 修改了验证逻辑 → 高风险且必须给出测试建议
+
+**若认为脚本评级不符实际**：不要直接改结论，先看 `rate_change()` 返回的 `reasons`
+（形如 `["R1 触及认证/权限/支付/订单核心逻辑", "R4 存在高风险模块"]`），
+需要调整规则时改代码并升 `RATING_RULES_VERSION`，改完对全部服务重跑
+`doctor.py --all --fix`（D8 会校验落盘评级与重算结果一致）。
 
 ### Step 5b — 专项校验规则（新增）
 
@@ -462,9 +450,12 @@ if (circularDeps.length > 0) {
 - 标注涉及的模块
 - 建议重构方向
 
-### Step 6 — 数据沉淀（自动执行，不可跳过）
+### Step 6 — 数据沉淀（生成产物时执行）
 
-每次完成 Step 1-5 分析后，**必须**将本次分析的结构化指标写入本地数据文件，用于后续历史对比和趋势分析。
+当用户要求生成报告、执行趋势分析、维护历史指标，或明确要求沉淀本次结果时，
+将 Step 1-5 的结构化指标写入本地数据文件，用于后续历史对比和趋势分析。
+如果用户只要求只读审查、解释 diff 或给出文字结论，默认不创建或修改 `diff-analytics`；
+可在回复中说明尚未沉淀，并在用户确认需要持久化后再执行本步骤。
 
 #### 6.1 数据存储位置
 
@@ -472,18 +463,76 @@ if (circularDeps.length > 0) {
 {workspace}/.workbuddy/diff-analytics/{service}/
 ├── service_metrics.json    ← 每次分析追加一条记录
 ├── version_chain.json      ← 每次分析追加版本关系
-└── file_history.json       ← 每次分析更新文件变更记录
+├── file_history.json       ← 每次分析更新文件变更记录
+├── version_bugs.json       ← 流程 A 导入（可无）
+└── cross_reference.json    ← 流程 B 映射产物（可无，由脚本全量重建）
 ```
 
 - `{service}` 为 Step 1.1 提取的服务名称（如 `portal-backend`、`agent`）
-- 若目录或文件不存在，**自动创建**（含空 JSON 骨架）
+- 启用数据沉淀时，若目录或文件不存在，自动创建（含空 JSON 骨架）
 - 完整 Schema 定义见 `references/analytics-schema.md`
+
+#### 6.1.1 三条不变量（2026-09-18 体检修复，写入时必须遵守）
+
+1. **版本键唯一写法**：同一版本在四个文件里必须只有一种写法。
+   跨文件比较**必须**先过 `_common.norm_version()`（`business-5.3.0.2` / `v5.3.0.2` / `5.3.0.2` → `5.3.0.2`）。
+   违反后果：实测曾出现 **49 个 Bug 有效关联 0 个**、`change_to_bug_ratio` 全 `null`。
+2. **`risk_score` 由脚本产出，禁止手填**：一律走 `scoring.canonical_risk_score()`，
+   并写入血缘字段 `risk_score_source = "script:scoring.canonical_risk_score(...)"`。
+   旧公式（`min(100, high*10+medium*5+low*1)`）的值**不删除**，改名 `risk_score_legacy` 留档审计。
+3. **变更文件清单不含输入产物**：`*tagdiff*.txt`、`temp_*`、`_build_*`、`*.bak/.pyc`
+   一律不进 `file_history`（`_common.is_junk_path()` 硬排除）。
+   非逻辑文件（lock / 构建配置 / 静态资源 / 文档 / `*.html`）**保留但降权**，不得剔除
+   —— 剔除会破坏「`file_history` 条目数 == `metrics.files_changed`」自检。
+
+#### 6.1.2 维护工具（做完分析后按需调用）
+
+```bash
+python scripts/sync_analytics.py --service <svc>     # 重建 file_history + 归一版本键 + 重算 risk_score
+python scripts/sync_analytics.py --all --backfill    # 全部服务；--backfill 从历史报告回填 files（仅限可完整还原的）
+python scripts/sync_analytics.py --service <svc> --check    # 只自检不改动
+python scripts/doctor.py --all                       # 一键体检 D1–D9（只读）
+python scripts/doctor.py --all --fix --move-temp     # 体检 + 自动修复 + 临时产物移入 _trash/（可逆）
+python scripts/verify_precision.py --all             # 精度标定（样本 < 30 时拒绝给权重建议）
+python -m pytest scripts/tests/ -q                   # 回归；项数以当前测试输出为准
+```
+
+**何时必跑**：① 改了 `scoring.py` / `quant_jit_risk.py` 的评分规则后 → 必须 `--all --fix` 重算；
+② 报告里的分数与最新代码不一致（**D8 会报**）→ 同上；③ 交报告前跑一次 `doctor --all`，问题数应为已知且可解释。
+
+#### 6.1.3 两个 `risk_score` 的口径（不可混用）
+
+| 字段 | 口径 | 用途 |
+|------|------|------|
+| `metrics.risk_score` | **静态 5 维**（`risk_score_mode: "static"`） | **趋势连线的唯一口径**，跨版本可比 |
+| `metrics.risk_score_enhanced` | 增强 10 维（有历史度量时） | 单份报告展示，**禁止参与趋势连线** |
+| `metrics.risk_score_legacy` | 旧公式 `min(100, high*10+medium*5+low*1)` | 仅历史审计，不再使用 |
+
+> ⚠️ 同一组 stats 下静态与增强权重不同（`base` 0.30→0.20、`core` 0.25→0.20），
+> **分数必然不同**（实测 87.0 vs 77.4）。`bug_trend.py` 检测到两种口径混用时会打
+> `mode_mixed` 警告横幅 —— 看到横幅说明趋势线不可信，先跑 `--fix` 统一口径。
 
 #### 6.2 写入步骤
 
+> **⚠️ 三个文件都有统一的「文件头」**：顶层固定为 `service` + `schema_version` + 业务键（`service_metrics.json` → `records`、`version_chain.json` → `versions`、`file_history.json` → `files`），见 `references/analytics-schema.md` §「初始化骨架」。下面各步给出的是**业务体的写入格式**；创建新文件时**先按骨架建好文件头**，再写业务体。
+
 **Step 6.2.1 — 追加 service_metrics.json**
 
-提取本次分析结果，追加到 `records` 数组末尾：
+先确保文件是**三键骨架**（不是裸的 `{"records": []}`）：
+
+```json
+{
+  "service": "{service}",
+  "schema_version": "1.0",
+  "records": []
+}
+```
+
+- `service` 必须与 `{service}` 目录名一致；`schema_version` 当前固定 `"1.0"`
+- **历史坑（2026-09-18 实测）**：早期手工 / LLM 写入的文件漏掉了 `service` 与 `schema_version`，只剩 `{"records": [...]}`（而由脚本 `bug_correlate.py` 写的 `version_bugs.json` / `cross_reference.json` 反倒是齐的——因为脚本自己会建骨架）。根因是本步骤此前**只给了 record 体、没给文件骨架**。
+- **遇到缺文件头的旧文件：只补这两个顶层键，不要动 `records` 内容。**
+
+然后把本次分析结果作为**一条记录**追加到 `records` 数组末尾：
 
 ```json
 {
@@ -498,7 +547,12 @@ if (circularDeps.length > 0) {
     "high_risk": 3,
     "medium_risk": 5,
     "low_risk": 7,
-    "risk_score": 72
+    "risk_score": 72,
+    "risk_score_mode": "static",
+    "risk_score_source": "script:scoring.canonical_risk_score(静态5维)",
+    "risk_score_legacy": 72,
+    "risk_score_legacy_formula": "min(100, high*10 + medium*5 + low*1)",
+    "rating_rules_version": "1.1"
   },
   "modules": [
     { "name": "auth", "files": 3, "risk": "high" },
@@ -516,7 +570,11 @@ if (circularDeps.length > 0) {
 
 **字段说明**：
 - `direction`：来自 Step 1.3 版本方向核查结果，取值 `forward` / `rollback` / `unknown`
-- `metrics.risk_score`：综合风险评分（0-100），计算公式：`high_risk * 10 + medium_risk * 5 + low_risk * 1`，上限 100
+- `metrics.risk_score`：**由脚本确定性产出**（`scoring.canonical_risk_score()`），
+  **不是** `high*10 + medium*5 + low*1`。后者是旧公式，其值只以 `risk_score_legacy` 形式留档审计。
+  **禁止手工填写 `risk_score`** —— 写完跑 `doctor.py --service <svc>`，D8 会校验落盘值是否等于重算值。
+  写入时用 `python scripts/sync_analytics.py --service <svc>` 自动补全上述血缘字段。
+- `metrics.rating_rules_version` / 顶层 `rating`：确定性评级及其规则版本（见 Step 5.1）
 - `modules`：Step 4 识别的模块及其风险等级
 - `detections`：Step 5b 五项专项检测的命中结果
 
@@ -539,7 +597,7 @@ if (circularDeps.length > 0) {
 
 **Step 6.2.3 — 更新 file_history.json**
 
-对本次变更的每个文件，更新其变更记录：
+对本次变更的每个文件，在 **`files`** 对象下更新其变更记录（下面的内容属于 `files`，**不是文件顶层**）：
 
 ```json
 {
@@ -552,12 +610,18 @@ if (circularDeps.length > 0) {
 }
 ```
 
+> **写入后的完整文件长这样**：`{"service": "<服务名>", "schema_version": "1.0", "files": { ...上面的条目... }}`。
+> `recent_changes` 等摘要字段与 `service` / `schema_version` **并列在顶层**，不要混进 `files`。
+> 历史坑（2026-09-18 实测）：早期手工写入把「路径 → 记录」直接放在顶层、漏掉了 `files` 包裹，
+> 导致 `quant_jit_risk.py` 的历史度量提取失效 → 已修复脚本为双结构兼容，但**新写入一律按规范结构**。
+
 - 若文件已存在：追加 `appear_in`、`risk_history`、`change_types` 对应元素，`change_count +1`
 - 若文件不存在：新建条目，`change_count = 1`
 
 #### 6.3 写入校验
 
 - 写入前检查文件是否为合法 JSON（防损坏）
+- **校验文件头**：顶层必须存在 `service` 与 `schema_version`；缺失则**先补齐再写**（`service` 取 `{service}` 目录名，`schema_version` 取 `"1.0"`）。这两个键是后续「产物完整性门禁」与多服务归属判定的依据
 - 追加记录后，验证 `records`/`versions` 数组长度增加 1
 - 若写入失败，**不阻塞报告输出**，在控制台提示数据沉淀失败
 
@@ -644,22 +708,29 @@ if (circularDeps.length > 0) {
 - 代码 diff 带语法高亮（`+` 绿色 / `-` 红色 / 上下文灰色）
 - 表格支持响应式布局
 - 中文界面
-- 输出路径：`{workspace}/diff_report_{项目名}_v{新版本}.html`
+- 输出路径：`{workspace}/report/code-diff/{service}/{service}_{旧版本}_to_{新版本}_变更影响分析报告.html`
 
 **生成流程**：
 1. 完成 Step 1-5 的分析
 2. 按照报告结构组织内容
 3. 使用 HTML 模板的样式和布局
 4. 写入 HTML 文件
-5. 使用 `preview_url` 在浏览器中预览
+5. 使用当前环境可用的 HTML 预览或浏览器工具检查版式；若没有预览工具，至少校验 HTML 结构和输出路径
 6. 告知用户文件路径，可直接分享给团队
-7. **【Bug 增强层条件注入】**若 `diff-analytics/{service}/version_bugs.json` 存在且非空（即做过 Bug 导入），在生成比对报告后**必须**追加趋势注入。**注入模式按报告类型区分**：
+7. **【Bug 增强层条件注入】**通过 `_common.load_bugs_doc()` 检测 Bug 数据：优先服务级 `version_bugs.json`，缺失时回退 `_project/version_bugs.json`。存在非空 Bug 数据时，在生成比对报告后按报告类型注入：
    - **单服务报告**（条件：`--service`）：
      ```bash
+     # 本次分析「只有 1 个服务」→ 注入
      python scripts/bug_trend.py --service {service} --report {本报告.html}
+     # 本次分析「含 ≥2 个服务」→ 必须带上 --services，脚本会拒绝注入（Bug 归口综合报告）
+     python scripts/bug_trend.py --service {service} --services {A} {B} --report {本报告.html}
+     #   → 输出 [SKIP] …；确需单服务视角时加 --force
+     # 已注入过的老报告要撤走：
+     python scripts/bug_trend.py --strip --report {本报告.html}
      ```
-     注入位置：模板 `<!-- BUG_TREND_SECTION -->` 占位符（自动替换）；已注入过则整块替换（**幂等，可重复执行**）；老报告无占位符时回退到 `</body>` 前
-   - **综合报告**（条件：`--combined --services A B C`）：先由 `gen_combined_report.py` 在 ⑤ 节写入 `<!-- BUG_TREND_COMBINED -->` 占位符，再聚合各服务 `version_bugs.json` 注入「综合跨服务」堆叠柱状图：
+     注入位置：模板 `<!-- BUG_TREND_SECTION -->` 占位符（自动替换）；已注入过则整块替换（**幂等，可重复执行**）；老报告无占位符时回退到 `</body>` 前。
+     **归口规则（2026-09-19 用户决策，必须先判服务数再动手）**：Bug 数据只放在**一处** —— 本次分析含 ≥2 个服务时归**综合报告**；只有 1 个服务时才放**单服务报告**。`--strip` 撤走后留一节「📈 版本 Bug 趋势分析」+ 归口提示（幂等，只认 `BUG_TREND_START/END`）。
+   - **综合报告**（条件：`--combined --services A B C`）：先由 `gen_combined_report.py` 在 ⑤ 节写入 `<!-- BUG_TREND_COMBINED -->` 占位符；注入时优先读取项目级池并只统计一次，项目池不存在时才聚合各服务数据：
      ```bash
      python scripts/bug_trend.py --combined --services {A} {B} {C} --report {综合报告.html}
      ```
@@ -677,16 +748,28 @@ if (circularDeps.length > 0) {
      - 定位路径（2026-09-10 实测校正）：`D:/Obsidian知识库/knowledge/初发项目/v{目标版本}/03-测试用例/{对应模块}/{模块}_v{目标版本}_测试用例.md`
        - ⚠️ 旧文档写的 `knowledge/测试用例/v{版本}/{模块}/用例/全量测试用例.md` **已不存在**，实际在 `初发项目/` 下按版本划分，且子目录为 `03-测试用例`（与 01-需求 / 02-设计文档 / 04-用例评审 并列）
        - 教学管理域模块与编号段：工作台 101xx / 我的班级 103xx / 学生列表 104xx / 课程管理 105xx / 班级管理 106xx / 学习档案 / 未入班
-       - 取编号：`grep -oE "^## [0-9]+ [^（(]*" "{模块}_v{版本}_测试用例.md"`
+       - 取编号：`rg -o "^## [0-9]+ [^（(]*" "{模块}_v{版本}_测试用例.md"`
      - 版本=本轮提测目标版本（动态确定，不写死历史版本）；模块由修改内容决定（如本轮「工作台/我的班级/学生列表」对应 `v5.3` 用例集）
      - 命中既有用例 → 该用例填 `kb_ref`（关联的编号），卡片显示绿色「✅ 已命中·关联 XXX」，可直接复用
      - 未命中（新增场景） → 该用例设 `estimated:true`，卡片显示红色「预估」，并注明（用户要求：未命中时注明，并提供部分预估测试用例）
      - 章节顶部统一显示绿色「📚 知识库用例集核对」框（已定位到 v{目标版本} 用例集 + AI 逐条核对结论 + 命中/预估计数），**不再使用「域差异全未命中红框」**（旧逻辑已废弃：所有服务本就同属教学管理域，按提测版本定位即可，不存在整集域不匹配）
-   - **⚠️ 综合报告 P1 块会落到末尾（2026-09-10 实测）**：`gen_combined_report.py` 产出的综合报告**没有「开发者建议」章节**，`gen_p1_cases.py` 找不到锚点时会把 P1 卡片追加到 `</body>` 前（在「⑤ 综合发布建议」之后）。
-     生成后需手工补：`<h2>⑥ P1 用例预测（基于影响范围 · 跨服务）</h2>` 章节标题，并在 `<!-- P1_CASES_END -->` 后补 `</div>` 闭合。
+   - **综合报告无占位符时的兜底**：`gen_p1_cases.py` 会自动生成完整的「P1 用例预测」章节并插入 `</body>` 前；区块由 `P1_CASES_START/END` 完整包裹，可重复运行，不需要手工补标题或闭合标签。
    - data JSON 结构见 `scripts/gen_p1_cases.py` 头部注释
-   - **规模统计注意（2026-09-10）**：前端仓库 diff 常含 `pnpm-lock.yaml` / `package-lock.json`，其行数会严重污染"变更行数"指标（本次 main-frontend lock 占 +264/-39）。
+   - **规模统计注意（2026-09-10）**：前端仓库 diff 常含 `pnpm-lock.yaml` / `package-lock.json`，其行数会严重污染"变更行数"指标（本次 main-frontend 占 +264/-39）。
      统计 `total_lines` 与「变更规模」时应**排除 lock 文件**，并在报告脚注注明已排除。
+
+9. **【交付打包（需要把整包发给他人时）】**用 `scripts/pack_reports.py` 打成**结构保真** zip（**不要**用 `arcname=basename` 拍平）：
+   ```bash
+   python scripts/pack_reports.py \
+     --root  "{workspace}/report/code-diff" \
+     --bundle "码上{版本}影响变更报告_{日期}" \
+     --out    "{workspace}/report/code-diff/码上{版本}影响变更报告_{日期}.zip" \
+     --file "portal-backend/xxx_变更影响分析报告.html" \
+     --file "manage-frontend/yyy_变更影响分析报告.html" \
+     --file "_综合/综合比对分析报告_xxx_{日期}.html"
+   ```
+   - `--file` 相对 `--root`，**原样保留子目录**（`_综合/`、`{service}/`）；脚本会自动写 `使用说明.txt` 并做**解压后链接自检**（断链退出码 3）。
+   - ⚠️ **一旦拍平，综合报告的 `../{service}/xxx.html` 必然断链**，解压后点击报 `ERR_FILE_NOT_FOUND`「无法访问您的文件」。单服务报告自包含可单独打开，只有综合报告的跨服务跳转依赖同级目录结构。
 
 8.5. **【Bug 预测（缺陷倾向预判）与 P1 合并呈现（必须，互补双维度）】**在生成 P1 用例后，**必须**运行 `gen_bug_predict.py`，将「向前看」的缺陷倾向预判（H1/H2/H3）注入到 **P1 章节之前**，形成「预判缺陷 → 可执行 P1 用例」同一回归用例集的双视角呈现（用户 2026-08-18 明确：Bug 预测与「测试范围/P1」互补，应合并进回归用例集）。
    - **与 P1 的关系**：P1 用例 = 「测试范围/可执行」（具体卡片）；Bug 预测 = 「缺陷倾向/风险点」（向前看）。二者维度互补，合并后回归测试者在同一章节即可看到「要测什么」与「可能出什么 Bug」。
@@ -700,7 +783,21 @@ if (circularDeps.length > 0) {
 
 9. **【量化风险评分 & JIT 缺陷预测自动追加（apex 能力整合）· 默认每次都跑】**单服务报告生成后，**必须**运行 `gen_quant_jit.py` 把量化评分 + JIT 预测并入报告。该步骤已**固化默认执行**，无需用户单独要求。
    - **展示形态（已与用户确认）**：分数环(0-100) + JIT 预测标签**合并进顶部「综合风险等级」横幅**（与🔴🟡🟢定性标签一体）；详细维度贡献表 + JIT 依据收为轻量卡，置于「变更总览」之前（模板 `<!-- QUANT_JIT_SECTION -->` 占位符）。**不**作为独立大章节放在报告末尾。
-   - **默认零配置（推荐）**：脚本可直接从已生成的报告 HTML 自动派生 stats（解析风险横幅等级 / 变更总览行数 / 代码块 +/- 行数 / 核心模式命中），无需手搓 JSON：
+   - **首选：`--from-metrics`（与趋势分同源，2026-09-18 起）**：stats 直接取自 `service_metrics.json`
+     里对应版本区间的记录，**报告里的量化分与趋势里的 `risk_score` 口径一致**：
+     ```bash
+     python scripts/gen_quant_jit.py --report {本报告.html} \
+         --from-metrics --service {service} --services {service}
+     ```
+     - `--from-metrics` 用报告文件名里的 `_X_to_Y_` 定位 metrics 记录（跨写法归一，`business-5.3.0.4` 与 `5.3.0.4` 等价）；
+       `--services {service}` 额外自动补历史度量 → 进入**增强 10 维**。
+     - **为什么不能用 `--auto` 当主力**：`--auto` 是在报告 HTML 里**数 `class="added"/"removed"` 的行数**来估计
+       `total_lines`、数变更总览表行数来估 `file_count`，而趋势分用的是 metrics 里权威的
+       `lines_added/lines_removed/files_changed`。**两边不同源 → 同一份变更两个分**。实测差距：
+       `portal-backend 5.3.0.3→5.3.0.4` HTML 数出 **54 行**、metrics 是 **271 行**（差 5 倍）；
+       `manage-frontend 5.3.0.7→5.3.0.8` `base_risk` HTML 判 **low**、metrics 判 **medium**。
+     - 匹配不到记录时会**明确告警并回退** `--auto`，不静默出错。
+   - **`--auto`（HTML 派生，降级路径）**：仅在历史遗留、report 文件名不含版本区间、或 metrics 不可用时使用：
      ```bash
      python scripts/gen_quant_jit.py --report {本报告.html} --auto
      ```
@@ -717,7 +814,7 @@ if (circularDeps.length > 0) {
      - `historical_metrics`：可选（buggy_ratio/churn_rate/mod_count/author_exp/days_since）；提供则进入**增强 10 维**模式（历史度量权重 25%），不提供则**静态 5 维**
    - **输出**：横幅内分数环(0-100) + JIT 预测标签（🔴高风险预测/🟡中等/🟢低）+ 变更总览前轻量卡（维度得分/权重/贡献表 + JIT 预测依据 + 审查建议 + 效果参考：Top-20% 覆盖 75%-88% 缺陷，AUC 0.72-0.83，规则引擎非 ML）
    - **价值**：把风险从「高/中/低」升级为「68 分/中风险」并可预测缺陷倾向；小 diff 但语义关键时（如本次学校版本降级），量化分可能低于定性结论，二者并列展示更能暴露「小而关键」的变更
-   - **综合报告同样默认执行**：综合报告生成后，再运行一次按服务注入汇总表（脚本取各服务最新独立报告自动派生 stats）：
+   - **综合报告同样默认执行**：综合报告生成后，再运行一次按服务注入汇总表（**同样优先 metrics 同源**，匹配不到才回退 HTML）：
      ```bash
      python scripts/gen_combined_report.py --services 服务A 服务B --workspace <工作区>
      python scripts/gen_quant_jit.py --report {综合报告.html} --combined --services 服务A 服务B --workspace <工作区>
@@ -735,7 +832,7 @@ if (circularDeps.length > 0) {
 - 单份文件**不触发本模式**，仍走 Step 1-7 单服务流程（行为完全不变）。
 
 ### 流程
-1. 对每个服务分别执行 Step 1-7 完整单服务分析（含格式识别、版本方向核查、风险评级、Bug 趋势注入），各自沉淀 `diff-analytics/{service}/` 与独立报告 `report/code-diff/{service}/`。
+1. 对每个服务分别执行 Step 1-7 单服务分析（含格式识别、版本方向核查、风险评级），生成独立报告并按需沉淀 `diff-analytics/{service}/`。多服务模式下，单服务报告不注入 Bug 趋势；若历史报告已有 Bug 区块，执行 `bug_trend.py --strip`，Bug 数据统一归口综合报告。
 2. 全部单服务分析完成后，运行综合报告脚本汇总：
    ```bash
    python scripts/gen_combined_report.py --services 服务A 服务B 服务C --workspace <工作区>
@@ -746,10 +843,10 @@ if (circularDeps.length > 0) {
 
 ### 综合报告结构（已确认：摘要卡 + 跨服务关联，不整篇拼装）
 1. **综合总览**：涉及服务数、**各服务变更版本矩阵**、版本批次、综合风险、总变更文件数、总关联 Bug 数
-2. **各服务摘要卡**：每个服务的风险徽章、**变更版本 from→to**、变更规模、Bug 数、专项检测、独立报告链接
+2. **各服务摘要卡**：每个服务的风险徽章、**变更版本 from→to**、变更规模、专项检测、独立报告链接。项目级 Bug 池存在时，不给每个服务重复显示同一个 Bug 数，只提示明细见第 ⑤ 节
 3. **跨服务关联与级联风险**：业务概念词典启发式匹配（接口路径/字段/单位/版本号），列出服务间潜在关联与级联高风险点
 4. **统一测试优先级**：合并各服务 high-risk 模块去重，输出 P1 必测清单
-5. **各版本 Bug 数据明细**：**仅当综合报告含 ≥2 服务时展示**（单服务详见其独立报告）。按服务展示「产生版本 / 解决版本」分布 + 严重度分布，数据来自各服务 `version_bugs.json` 的 `found_in_version` / `fixed_in_version`（2026-09-16 用户建议：综合报告要能看到各版本 Bug 数据）。节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，由 `bug_trend.py --combined` 注入「综合跨服务」版本堆叠柱状图（条件注入：综合报告画聚合图，单服务报告画独立图）
+5. **各版本 Bug 数据明细**：**仅当综合报告含 ≥2 服务时展示**。优先读取 `_project/version_bugs.json` 并只统计一次；项目池不存在时才聚合各服务 `version_bugs.json`。节内预留 `<!-- BUG_TREND_COMBINED -->` 占位符，由 `bug_trend.py --combined` 注入版本趋势、修复率、端归属预判拆分和明细表
    - 综合总览的「总关联 Bug」口径改为 **已关闭 X / 已解决 Y**（区分 `已解决` 与 `已关闭`，不再把 `已解决` 计入 `已关闭`，2026-09-16 修正 `bug_correlate.py` 状态映射）
 4.5. **P1 用例预测（基于影响范围）**：由 `gen_p1_cases.py` 注入，内容同单服务（具体卡片版 + 知识库命中核对 + 预估标注），重点覆盖跨服务耦合高危点
 6. **综合发布建议**：基于综合风险 + 级联 + 同批次给出发布策略
@@ -766,7 +863,8 @@ if (circularDeps.length > 0) {
 - **默认用相对路径（推荐，可跨机器分享）**：综合报告在 `report/code-diff/_综合/`，服务报告在 `report/code-diff/{service}/`，二者同级，链接写为 `../{service}/xxx.html`。整目录拷贝到任意机器后直接双击 `_综合/xxx.html` 即可点击跳转，不依赖本机绝对路径。
 - **`--absolute` 回退绝对路径（仅本地预览，不可分享）**：加 `--absolute` 时链接回退为 `<a href="file:///d:/.../xxx.html">`，路径写死本机。仍须**不带 `target` 属性**（WorkBuddy 预览器拦截 file:// 链接，带 target 点击失效，2026-08-13 实测）。
 - 路径须统一为正斜杠（`report_path.replace("\\","/")`）。
-- 若预览面板仍跳不过去，多为 http 渲染沙箱拦截 file:// 所致，改用 present_files 的三张卡片直接打开即可。
+- 若预览面板仍跳不过去，多为渲染沙箱拦截 `file://` 所致；改用当前环境提供的本地文件打开/预览能力，或直接告知用户完整文件路径。
+- **打包分享时必须「结构保真」**（2026-09-18 修复）：上述相对链接依赖 `_综合/` 与 `{service}/` 同级，用 `scripts/pack_reports.py` 打包会自动保留层级并做解压后链接自检；**拍平打包（`arcname=basename`）会让链接全部断掉**，表现为「无法访问您的文件 / ERR_FILE_NOT_FOUND」。
 
 ---
 
@@ -802,8 +900,8 @@ Bug 数据是**可选增强层**。没有 Bug 数据，体系照常运转；有�
 ### A.2 导入处理流程
 
 1. **解析输入**：根据触发方式（Excel/逐条/粘贴）解析 Bug 数据
-2. **确定服务**：若用户指定服务名，使用指定值；否则从 `version_chain.json` 中按 `found_in_version` 匹配
-3. **写入 version_bugs.json**：将解析后的 Bug 追加到对应服务的 `version_bugs.json`
+2. **确定归属范围**：若数据明确只属于一个服务，使用该服务名；若一份提测 Bug 列表混合前后端且没有可靠服务列，使用 `_project` 项目级池，禁止猜测并挂到某个“主服务”
+3. **写入 version_bugs.json**：固化脚本以 Excel 为权威源全量覆写目标系列；单服务写入 `{service}/version_bugs.json`，整包数据写入 `_project/version_bugs.json`
 4. **触发映射**：执行流程 B（映射引擎）
 
 ### A.3 Excel 列名映射
@@ -832,8 +930,10 @@ Bug 列表格式已固化（TAPD 导出，`bug` sheet，17 列）：
 **脚本**：`scripts/bug_correlate.py`（同时完成 Flow A 解析 + Flow B 映射）
 
 ```bash
-# 指定服务 + 目标版本（推荐：按版本系列隔离）
-python scripts/bug_correlate.py --xlsx "5.3.0.0bug列表.xlsx" --service portal-backend --version 5.3.0.2
+# 前后端混合的提测整包（推荐：写项目级池，避免重复计数和过度归因）
+python scripts/bug_correlate.py --xlsx "5.3.0.0bug列表.xlsx" --service _project --version 5.3.0.2
+# 数据确实只属于单个服务时，才写服务级文件
+python scripts/bug_correlate.py --xlsx "portal-backend-bug.xlsx" --service portal-backend --version 5.3.0.2
 # 不指定服务时，自动按版本匹配 diff-analytics 中各服务的 version_chain.json 探测
 python scripts/bug_correlate.py --xlsx "5.3.0.0bug列表.xlsx"
 # 旧行为：保留全部版本系列不做归档（不推荐）
@@ -853,9 +953,9 @@ python scripts/bug_correlate.py --xlsx "..." --service portal-backend --keep-all
 - **全量覆写** `version_bugs.json`：每次都以 xlsx 为唯一权威来源重新生成**目标系列**的记录，不 append、不保留"记忆中的旧状态"
 - **自动回填 `bug_links`（2026-09-10 新增）**：把本轮 Bug id 写入 `service_metrics.json` 中对应版本记录的 `bug_links`。
   综合报告摘要卡的「关联 Bug」读该字段，**不回填会一直显示 0**（历史遗留问题，已修复）。
-- **多服务归属**：一份 Bug 列表常横跨前后端（如 5.3.0.0 列表既有后端统计口径也有前端文案）。综合报告按服务**求和**，同一份列表导入到多个服务会导致 Bug 数**翻倍**。
-  建议：整份导入到**主服务**（通常是有历史数据的后端服务），其余服务在报告中做定性引用，不重复导入。
-- **状态映射**：`状态` 列 `已关闭/已解决/关闭` → `closed`，其余 → `open`（绝不凭"同文件/同方法"推断未解决）
+- **多服务归属**：一份 Bug 列表常横跨前后端（如 5.3.0.0 列表既有后端统计口径也有前端文案）。同一份列表导入到多个服务会导致 Bug 数翻倍，并造成服务级过度归因。
+  规则：无可靠服务列时整份导入 `_project` 项目级池；通过 `side_pre` 做前端/后端/通用预判展示，但不把预判当成精确服务归属或评分依据。
+- **状态映射**：`状态` 列 `已关闭/关闭` → `closed`，`已解决` → `resolved`，其余 → `open`（绝不凭"同文件/同方法"推断未解决）
 - **严重程度映射**：`严重`→critical / `高`→high / `一般`·`中`→medium / `低`·`建议`→low；同时保留 `severity_raw` 原文
 - **编号清洗**：Excel 浮点 `80729.0` → `80729`
 - 自动运行映射引擎，**全量重建** `cross_reference.json`（mapping 规则见流程 B）
@@ -868,54 +968,99 @@ python scripts/bug_correlate.py --xlsx "..." --service portal-backend --keep-all
 ### B.1 映射逻辑
 
 > 本映射已由 `scripts/bug_correlate.py` 在导入时自动执行（见流程 A.4），每次**全量重建** `cross_reference.json`（而非追加），确保所有权和派生指标始终与 `version_bugs.json` 一致。
+> 也可单独重跑：`python scripts/bug_correlate.py --xlsx <bug.xlsx> --service <svc>`
 
-当 Bug 数据写入 `version_bugs.json` 后，自动执行以下映射：
+**驱动源**：`service_metrics.json` 的 `records`（**不是**「版本链 ∪ Bug 版本」的并集）。
+这样不会产出「没有 metrics 的空壳 mapping」，且 `mapping 数 == 记录数` 恒成立。
 
-**映射维度 1 — Bug ↔ 变更文件**：
-- 按 `found_in_version` 匹配 `version_chain.json`，定位版本区间
-- 按 `module`（如有）匹配 `service_metrics.json` 中对应版本的 `modules`
-- 按 `related_files`（如有）匹配 `file_history.json`
+**版本键必须先归一（2026-09-18 修的根因）**：三个数据文件对同一版本有三种写法
+（`version_bugs` 裸号 `5.3.0.2` / `service_metrics` 与 `version_chain` 带前缀 `business-5.3.0.2`），
+比较前一律过 `_common.norm_version()`。**任何新增的跨文件比较都必须先归一**，
+否则会重现「49 个 Bug 有效关联 0 个」的断裂。
 
-**映射维度 2 — Bug ↔ Commit**：
-- 按 `related_commits`（如有）直接关联
-- 若无 `related_commits`，按时间区间匹配 `service_metrics.json` 中该版本的 commit 列表
+**映射维度 1 — Bug ↔ 版本区间**：
+- `bugs_found_in_version` = `norm_version(found_in_version) == norm_version(record.version_to)`
+- `bugs_fixed_in_version` = `norm_version(fixed_in_version) == norm_version(record.version_to)`
+  （修复版本落在没有分析区间的版本上时，**不硬塞给相邻区间**，宁缺勿假）
+- `bugs_from_parent_version` = 父版本发现的 Bug，**只作上下文，绝不并入分子**
+  （口径澄清：`change_to_bug_ratio` = 本版本发现的 Bug / 产出本版本的变更文件数；
+  父版本 Bug 属上一次变更的质量债，并入会虚增本区间比值）
+
+**映射维度 2 — 高风险变更 ↔ Bug（含归因方式）**：
+- `module_data_coverage > 0` → 走**精确匹配**：Bug `module` 与 `modules[].name` 包含匹配，`attribution = "module"`
+- `module_data_coverage == 0`（实测 TAPD 导出的 `module` 列**全为空**）→ 退化为**版本级归因**：
+  该区间所有 Bug 记到高风险项下，`attribution = "version"`，并在产物顶部显式标注。
+  **不得伪装成精确匹配** —— 归因方式必须能从产物里看出来。
 
 **映射维度 3 — Bug ↔ 专项检测**：
-- 检查 Bug 所在版本的 `detections` 是否命中
-- 标记"检测命中且有 Bug"和"检测命中但无 Bug"两类
+- `detection_precision[k] = {hit_with_bug, hit_total}`，反映「检测命中且该区间确实有 Bug」的真实归因
+
+**结构性缺源（如实标注，不造数据）**：
+- `commits_with_bugs` 恒为 `null` + `commits_data_source: "unavailable"`
+  —— `service_metrics.json` 里**根本没有** commit 列表，属输入缺失，不是「暂时没算」。
 
 ### B.2 映射输出
 
-写入 `cross_reference.json`，按版本区间组织：
+写入 `cross_reference.json`，按版本区间组织（**实际字段，schema_version 1.1**）：
 
 ```json
 {
-  "version_range": "5.1.0.3→5.1.0.4",
-  "bugs_found_in_version": ["BUG-2026-0042"],
-  "bugs_fixed_in_version": ["BUG-2026-0039"],
-  "change_to_bug_ratio": 0.13,
-  "high_risk_changes_with_bugs": [
+  "service": "portal-backend",
+  "schema_version": "1.1",
+  "generated_at": "2026-09-18 22:39:12",
+  "source": "service_metrics.json (metrics-driven)",
+  "version_key_policy": "norm_version: 取首个「数字.数字」连续段，跨文件比较前必须归一",
+  "attribution": "version",
+  "module_data_coverage": 0.0,
+  "module_data_missing": true,
+  "high_risk_hit_rate": 0.714,
+  "high_risk_total": 7,
+  "high_risk_with_bug": 5,
+  "mappings": [
     {
-      "file": "AuthController.java",
-      "risk": "high",
-      "bug_ids": ["BUG-2026-0042"],
-      "detection_hit": "data_format_change"
-    }
-  ],
-  "commits_with_bugs": [
-    {
-      "commit": "a3f2c1d",
-      "message": "fix: OAuth2 callback",
-      "bug_ids": ["BUG-2026-0042"]
+      "version_range": "5.3.0.1→5.3.0.2",
+      "version_to": "5.3.0.2",
+      "version_to_raw": "business-5.3.0.2",
+      "bugs_found_in_version": ["BUG-2026-0042"],
+      "bugs_fixed_in_version": ["BUG-2026-0039"],
+      "bugs_from_parent_version": ["BUG-2026-0035"],
+      "change_to_bug_ratio": 0.13,
+      "high_risk_changes_with_bugs": [
+        {
+          "module": "我的班级/实训接口(classIndexByIds)",
+          "file": null,
+          "files": 2,
+          "risk": "high",
+          "bug_ids": ["BUG-2026-0042"],
+          "detection_hit": ["data_format_change"],
+          "attribution": "version"
+        }
+      ],
+      "high_risk_total": 6,
+      "high_risk_with_bug": 2,
+      "high_risk_hit_rate": 0.333,
+      "commits_with_bugs": null,
+      "commits_data_source": "unavailable",
+      "detections": {"data_format_change": true, "test_sync_needed": true},
+      "detection_precision": {
+        "data_format_change": {"hit_with_bug": 1, "hit_total": 1},
+        "version_rollback": {"hit_with_bug": 0, "hit_total": 0}
+      },
+      "files_changed": 11,
+      "segment": "forward"
     }
   ]
 }
 ```
 
 **衍生指标计算**：
-- `change_to_bug_ratio`：`bugs_found_in_version.length / files_changed`
+- `change_to_bug_ratio`：`len(bugs_found_in_version) / files_changed`（**不含**父版本 Bug）
 - `high_risk_hit_rate`：有 Bug 的高风险变更数 / 高风险变更总数
 - `detection_precision`：检测命中且有 Bug 的数量 / 检测命中总数量
+
+**健康检查**：`python scripts/doctor.py --service <svc>` 的 **D4** 会校验
+`mapping 数 == 记录数`、`cross_reference` 是否落后于最新分析日期、是否仍有全 `null` 比值；
+**D2** 会报出「同一版本多种写法」（修复前必报，修完应为空）。
 
 ---
 
@@ -940,7 +1085,7 @@ python scripts/bug_correlate.py --xlsx "..." --service portal-backend --keep-all
 
 ### C.2 增强层分析（有 Bug 数据时自动激活）
 
-检测 `{service}/version_bugs.json` 是否存在且非空。若存在，在基础层之上额外输出：
+通过 `_common.load_bugs_doc()` 检测 Bug 数据：服务级文件优先，缺失时回退 `_project/version_bugs.json`。若结果非空，在基础层之上额外输出：
 
 | # | 维度 | 数据来源 | 输出格式 |
 |---|------|----------|----------|
@@ -975,12 +1120,12 @@ python scripts/bug_trend.py --combined --services portal-backend main-frontend m
 - 图②：各版本修复率（发现版本内已关闭/已解决占比）
 - 表③：版本维度明细（发现/修复 Bug 数、严重度、已关闭/解决、修复率、变更文件数、Bug/变更比）
 - **单服务注入（`--service --report`）**：以 `bt-` 作用域样式嵌入比对报告，幂等可重复执行，落到「版本 Bug 趋势分析（跨版本累计）」区块
-- **综合注入（`--combined --services --report`）**：`build_stats_combined()` 跨服务聚合各 `version_bugs.json`，经 `<!-- BUG_TREND_COMBINED -->` 占位符注入综合报告「各版本 Bug 数据明细」节；**条件注入规则：综合报告→聚合图，单服务报告→独立图**
+- **综合注入（`--combined --services --report`）**：`build_stats_combined()` 优先读取 `_project/version_bugs.json` 并只统计一次；项目池不存在时才跨服务聚合各 `version_bugs.json`。结果经 `<!-- BUG_TREND_COMBINED -->` 占位符注入综合报告「各版本 Bug 数据明细」节
 
 ### C.3 分析输出格式
 
 - 表格类：Markdown 表格
-- 趋势类：HTML 内嵌 Chart.js 图表
+- 趋势类：HTML 内联 SVG 图表，无 CDN 依赖
 - 热力图类：HTML 内嵌色阶表格
 - 输出路径：`{workspace}/diff_analytics_report_{日期}.html`
 
@@ -988,9 +1133,11 @@ python scripts/bug_trend.py --combined --services portal-backend main-frontend m
 
 - 若 `diff-analytics/` 目录不存在或所有服务均无数据 → 提示"暂无积累数据，请先执行版本比对分析"
 - 若某服务只有 1 条记录 → 输出单条摘要，提示"数据不足，需2次以上分析才能展示趋势"
-- 若 `version_bugs.json` 不存在 → 跳过增强层，仅输出基础层 4 维度
+- 若服务级与项目级池均无 `version_bugs.json` → 跳过增强层，仅输出基础层 4 维度
 
----## 注意事项
+---
+
+## 注意事项
 
 - **【版本方向】文件名方向 ≠ 实际方向**：`compare_A_to_B.md` 文件名中 A/B 顺序可能与实际变更方向相反。每次分析**必须执行 Step 1.3 的三步验证法**，通过版本号大小 + Commit 时间线双重确认真实方向，并在报告顶部以版本方向横幅明确展示
 - **【版本方向】diff 内容语义**：`-` 行始终代表"旧版本中有、新版本中移除"，`+` 行始终代表"新版本中新增"，与文件名无关
@@ -1003,10 +1150,85 @@ python scripts/bug_trend.py --combined --services portal-backend main-frontend m
 - 对于存储格式变更（如 Redis/DB schema），必须评估下游兼容性
 - **必须执行专项校验**：版本回退、敏感信息、测试同步、循环依赖
 - 敏感信息检测到后，必须明确标注并提供脱敏建议，不可直接展示完整敏感内容
-- **【数据沉淀】Step 6 不可跳过**：每次分析完成后必须执行数据沉淀，将结构化指标写入 diff-analytics 目录
-- **【Bug 数据】可选增强层**：version_bugs.json 和 cross_reference.json 不存在时，分析仅输出基础层 4 维度；存在时自动叠加增强层 4 维度
+- **【数据沉淀】按任务意图执行**：生成报告、趋势分析、维护历史指标或用户明确要求沉淀时执行 Step 6；只读审查/解释默认不写文件
+- **【Bug 数据】可选增强层**：服务级与项目级池均无 Bug 数据时仅输出基础层 4 维度；存在时自动叠加增强层 4 维度
 - **【映射引擎】Bug 导入后自动触发**：写入 version_bugs.json 后立即运行映射引擎，生成 cross_reference.json
 - **【数据完整性】写入前校验**：追加 JSON 记录前需验证文件为合法 JSON，写入后验证数组长度增加
+
+## CI / 容器化流水线（pipeline_wrapper）
+
+> **现状（2026-09-18 核实）**：编排脚本与容器镜像**已就绪**，但**尚未接入真实 CI 系统**。当前链路是**半自动**：人跑上游 `tagdiff.sh` 产 `tagdiff.txt` → 交给本技能做语义分析 → 产物落盘 → 再由 `pipeline_wrapper.py` 消费出报告。真实 Jenkins / GitLab CI 里目前**没有任何服务于 code-diff-analyzer 的流水线定义**（无 Jenkinsfile / `.gitlab-ci.yml` / Shared Library step）。
+
+### 定位：LLM 前置，流水线只做确定性执行
+
+Step 1-7 的语义分析（格式识别 / 变更分类 / 模块依赖 / 风险评分）由 LLM Agent 在 PR 前置阶段完成，产物 `service_metrics.json` 落盘到 `.workbuddy/diff-analytics/{service}/`。`pipeline_wrapper.py` **只消费**这些结果，不在流水线内做 LLM 推理——避免发布链路被 AI 延迟 / 成本拖累。
+
+### 编排的 4 个脚本
+
+`scripts/` 下包含多个 Python 工具；wrapper **只编排其中 4 个**：
+
+| 脚本 | 职责 | 前置依赖 |
+|---|---|---|
+| `bug_correlate.py` | Bug 关联（Flow A+B，全量重建 `version_bugs.json` / `cross_reference.json`） | `--xlsx` |
+| `bug_trend.py` | 版本 Bug 趋势（内联 SVG，无 CDN） | `version_bugs.json` 已就绪 |
+| `gen_combined_report.py` | 综合比对分析报告（多服务聚合） | ≥2 个服务 |
+| `gen_p1_cases.py` | P1 用例注入（幂等） | `--p1-data-file` |
+
+> `gen_bug_predict.py` / `gen_quant_jit.py` / `quant_jit_risk.py` / `gen_midscene_yaml.py` **不在 wrapper 范围内**，仍由技能工作流按 Step 8.5 / Step 9 单独调用。
+
+### 分阶段执行（--stage）
+
+```bash
+# analyze：准备工作区 + 可选 git 浅克隆 + 写运行元数据 + 交接校验（严格把关）
+python scripts/pipeline_wrapper.py --stage analyze --service portal-backend \
+    --repo-url git@xxx/portal-backend.git --target-tag v1.1
+
+# score：Bug 关联 + 趋势
+python scripts/pipeline_wrapper.py --stage score --service portal-backend --xlsx bug.xlsx
+
+# report：多服务综合报告 + P1 注入
+python scripts/pipeline_wrapper.py --stage report --services a b c --p1-data-file p1.json
+
+# all：analyze → score → report（默认）
+python scripts/pipeline_wrapper.py --stage all --service portal-backend --xlsx bug.xlsx
+```
+
+### 退出码约定（CI 门禁依赖）
+
+| 退出码 | 含义 | CI 处置 |
+|---|---|---|
+| `0` | 阶段成功 | 放行 |
+| `1` | 参数错误（缺 `--service`、`--xlsx` 不存在等） | 失败，检查流水线配置 |
+| `2` | **analyze 交接未就绪**（`service_metrics.json` 缺失） | 失败，提示补做前置语义分析 |
+| 其他非零 | 子脚本自身退出码（透传） | 失败，看子脚本日志 |
+
+`2` 是 analyze 的专用退出码，让 CI 能区分「前置语义分析没做」与「脚本本身报错」，避免笼统失败。
+
+### 豁免通道
+
+手动 / 开发场景产物尚未生成时，加 `--allow-missing-metrics` 跳过阻断（降级为警告 + 退出码 0）：
+
+```bash
+python scripts/pipeline_wrapper.py --stage all --service portal-backend --allow-missing-metrics
+```
+
+### 容器化
+
+`scripts/Dockerfile`：`python:3.11-slim` 基础镜像，仅装 `openpyxl`，`ENTRYPOINT` 指向 `pipeline_wrapper.py`。工作区通过 `--workspace` 或环境变量 `$WORKSPACE`（Jenkins 注入）解析，覆盖子脚本里硬编码的 `d:/workbuddy/测试日常`，使容器内也能正确落盘。
+
+```bash
+docker build -t code-diff-analyzer scripts/
+docker run --rm -v /path/to/workspace:/workspace -e WORKSPACE=/workspace \
+    code-diff-analyzer --stage all --service portal-backend --xlsx /workspace/bug.xlsx
+```
+
+### 与上游 `tagdiff.sh` 的关系
+
+`tagdiff.sh`（Jenkins 上游脚本，2026-09-10 起为 v2）负责产 `tagdiff.txt`（含变更概览 / 下一层模块分布 / 文件级差异统计），本技能负责**解析与分析**——二者是**上下游**关系，不是同一条流水线。`tagdiff.txt` 解析锚点见「Step 1.1 格式识别 · 格式 A v2」。
+
+### 待补
+
+- 真实 CI 系统里的 `Jenkinsfile` / Shared Library step **尚未编写**；接入后即可把 `--stage analyze` 作为质量门禁的前置步骤。
 
 ## 参考资源
 
@@ -1020,4 +1242,17 @@ python scripts/bug_trend.py --combined --services portal-backend main-frontend m
 - **综合比对报告脚本（多服务汇总）**：`scripts/gen_combined_report.py`
 - **P1 用例预测注入脚本（具体卡片版 + 知识库命中核对）**：`scripts/gen_p1_cases.py`
 - **Bug 预测（缺陷倾向预判）注入脚本 —— 与 P1 合并呈现（互补双维度）**：`scripts/gen_bug_predict.py`（幂等；`--data-file` 注入 🐞Bug 预测总览 + 逐条详情 + P1↔Bug 映射表，置于 P1 章节之前；模板占位符 `<!-- BUG_PREDICT_SECTION -->`）
-- **量化风险评分 & JIT 缺陷预测（ape 能力整合，默认每次都跑）**：`scripts/quant_jit_risk.py`（计算引擎，可选历史度量）/ `scripts/gen_quant_jit.py`（渲染+注入，幂等；`--auto` 零配置从报告派生 stats；`--combined` 按服务注入综合报告汇总表，合并进风险横幅）
+- **量化风险评分 & JIT 缺陷预测（ape 能力整合，默认每次都跑）**：`scripts/quant_jit_risk.py`（计算引擎，可选历史度量）/ `scripts/gen_quant_jit.py`（渲染+注入，幂等；**`--from-metrics` 从 `service_metrics.json` 派生 stats —— 与趋势分同源，首选**；`--auto` 从报告 HTML 派生为**降级路径**；`--combined` 按服务注入综合报告汇总表，合并进风险横幅）
+- **CI / 容器化流水线统一入口（编排 4 个固化脚本，三 stage）**：`scripts/pipeline_wrapper.py`（`--stage analyze|score|report|all`；analyze 交接未就绪退出码 `2`，`--allow-missing-metrics` 豁免）
+- **容器镜像定义**：`scripts/Dockerfile`（`python:3.11-slim` + openpyxl，`ENTRYPOINT` 指向 `pipeline_wrapper.py`）
+
+### 基础能力模块（2026-09-18 新增，禁止在各脚本里另起一份实现）
+
+| 模块 | 职责 | 为什么必须共用 |
+|------|------|----------------|
+| `scripts/_common.py` | 版本键归一 `norm_version()` / `version_key()`；变更文件过滤 `is_junk_path()` / `is_logic_path()` / `filter_change_files()` | 版本键写法不一致曾导致 **Bug↔变更 0 关联**；路径过滤口径分散会破坏 `file_history 条目数 == files_changed` 自检 |
+| `scripts/scoring.py` | `canonical_risk_score()`（唯一 risk_score 口径）、`rate_change()`（R1–R7 确定性评级，rules 1.1）、`derive_stats()`、`detect_data_format_change()` | 原先两套分并存且都由 LLM 手填；评级是伪代码 → 同一 diff 两次跑可能不同等级 |
+| `scripts/sync_analytics.py` | file_history 确定性重建 / 存储层版本键归一 / 历史报告回填 `files` / risk_score 重算 | 手工维护导致条目非确定性丢失（实测 3/5 服务严重丢失） |
+| `scripts/doctor.py` | 一键体检 D1–D9 + 可逆自动修复 | 把「全靠人工肉眼比对」的检查固化；**D8 专抓「代码改了数据没重算」** |
+| `scripts/verify_precision.py` | 真实命中率 / 检测精度 / 分桶单调性 / 权重建议（样本 < 30 时**拒绝**给建议） | 让「精度」可被度量，而不是报告里的一句形容词 |
+| `scripts/tests/` | pytest 回归集（项数以当前运行结果为准），合成工作区复刻历史缺陷特征 | 锁死「0 关联」「空壳 mapping」「父版本 Bug 进分子」「P1 区块落到 HTML 外」等回归 |

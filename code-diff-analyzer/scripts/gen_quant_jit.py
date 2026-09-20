@@ -42,7 +42,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from quant_jit_risk import compute, generate_jit, auto_historical, CORE_PATTERNS  # noqa
-import cdx_errors  # noqa: E402  统一错误提示层
+from scoring import derive_stats as derive_stats_from_metrics  # noqa
+from _common import norm_version, safe_write_report  # noqa
 
 # —— 单服务：注入守卫 ——
 START = "<!-- QUANT_JIT_START -->"
@@ -66,13 +67,19 @@ def esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def wkey(name):
-    return (name.lower()
-            .replace("历史bug频率", "buggy").replace("代码流失率", "churn")
-            .replace("修改频率", "modfreq").replace("作者经验", "authorexp")
-            .replace("距上次修改", "dormancy").replace("基础风险", "base")
-            .replace("变更规模", "size").replace("模块跨度", "span")
-            .replace("核心模块占比", "core").replace("变更密度", "density"))
+def dim_weight(q, name):
+    """取维度权重。
+
+    【2026-09-18 修复】原实现本地维护了一份「维度中文名 -> 权重键」的映射（wkey），
+    与 quant_jit_risk.py 里那份重复 —— 改一处漏一处。现统一读 compute() 返回的
+    `dimension_weights`（单一真源），并对旧维度名做别名兼容。
+    """
+    dw = q.get("dimension_weights")
+    if isinstance(dw, dict) and name in dw:
+        return dw[name]
+    # 兼容：历史 stats 用旧维度名「历史Bug频率」
+    alias = {"历史Bug频率": "Bug未解决率"}
+    return (dw or {}).get(alias.get(name, name), 0)
 
 
 # ============================================================
@@ -99,7 +106,7 @@ def render_detail(q, jit):
     mode_cn = "增强10维（含历史度量）" if q["mode"] == "enhanced" else "静态5维（无历史度量）"
     dim_rows = ""
     for name, sc in q["dimensions"].items():
-        w = q["weights"].get(wkey(name), 0)
+        w = dim_weight(q, name)
         dim_rows += ("<tr><td>%s</td><td style='text-align:center'>%s</td>"
                      "<td style='text-align:center'>%s%%</td>"
                      "<td style='text-align:center'>+%s</td></tr>") % (
@@ -125,6 +132,73 @@ def render_detail(q, jit):
       </div>
     </div>%s""" % (START, mode_cn, dim_rows, basis, esc(eff["description"]),
                   esc(eff["top20_recall"]), esc(eff["auc"]), esc(eff["note"]), END)
+
+
+def sync_banner_rating(html, rating):
+    """把风险横幅评级同步为 metrics 的确定性评级（2026-09-18 用户反馈「结论不一致」）。
+
+    背景：横幅 `class="risk-banner X"` / 「综合风险等级：X」是报告撰写时的**定性**
+    正文；而确定性评级 `rate_change()`（rules 1.1）由 metrics 决定。两者不一致时
+    报告内出现两个评级标签（实测：manage-frontend 横幅「低」 vs 确定性「中」）。
+
+    策略：横幅（class + icon + 等级行）同步为确定性评级；原定性结论**不删除**，
+    改写进括号内标注「原定性：X」，正文 <p> 末尾追加一句口径说明。确定性评级
+    与原定性一致时为幂等 no-op。
+
+    rating: metrics 记录的 rating dict（含 code / level），缺 code 时原样返回。
+    """
+    code = (rating or {}).get("code")
+    if code not in ("high", "medium", "low"):
+        return html, False
+    emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}[code]
+    cn = {"high": "高", "medium": "中", "low": "低"}[code]
+    rules = (rating or {}).get("rules_version") or "1.1"
+
+    m = re.search(r'class="risk-banner (high|medium|low)"', html)
+    if not m:
+        return html, False
+    old = m.group(1)
+    changed = False
+    if old != code:
+        html = html.replace(m.group(0), f'class="risk-banner {code}"', 1)
+        changed = True
+
+    # icon
+    old_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}[old]
+    if old != code and f'<div class="risk-icon">{old_emoji}</div>' in html:
+        html = html.replace(f'<div class="risk-icon">{old_emoji}</div>',
+                            f'<div class="risk-icon">{emoji}</div>', 1)
+        changed = True
+
+    # 等级行（保留原括号内容，标注原定性）
+    def _strong_repl(mm):
+        nonlocal changed
+        old_cn, old_reason = mm.group(1), mm.group(2).strip()
+        if old_cn == cn:
+            # 等级已一致（含已同步过的报告）→ 幂等 no-op，不动括号内容
+            return mm.group(0)
+        changed = True
+        reason = old_reason or "—"
+        # 已同步过的报告：把旧「原定性：X」更新为当前定性表述
+        reason = re.sub(r"；?量化确定性评级[^；]*原定性「[高中低]」", "", reason).strip("；； ")
+        suffix = f"；量化确定性评级 rules {rules}，原定性「{old_cn}」"
+        return f"<strong>综合风险等级：{cn}（{reason}{suffix}）</strong>"
+
+    html2 = re.sub(r"<strong>综合风险等级：([高中低])（([^<]*)）</strong>", _strong_repl, html, count=1)
+    if html2 != html:
+        changed = True
+        html = html2
+
+    # 正文口径说明（只加一次）
+    note = (f'<br><span style="color:#b06000;font-size:12.5px">⚠ 评级口径：确定性评级'
+            f'（rate_change rules {rules}）=「{cn}」，横幅已同步；原定性「'
+            f'{ {"high":"高","medium":"中","low":"低"}[old] }」保留于括号内供对照。</span>')
+    if old != code and "评级口径：确定性评级" not in html:
+        pm = re.search(r'(<strong>综合风险等级：[\s\S]*?</strong>[\s\S]*?)</p>', html)
+        if pm:
+            html = html[:pm.end(1)] + note + html[pm.end(1):]
+            changed = True
+    return html, changed
 
 
 def inject(html, q, jit):
@@ -154,7 +228,8 @@ def inject(html, q, jit):
                '<table class="overview-table">'):
         if mk in html:
             return html.replace(mk, detail + "\n\n    " + mk, 1)
-    return html + "\n" + detail
+    # 兜底：绝不 append 到文档末尾（会落到 </html> 之后），插到 </body>/</html> 之前
+    return _insert_before_body_end(html, detail)
 
 
 # ============================================================
@@ -162,21 +237,25 @@ def inject(html, q, jit):
 # ============================================================
 def render_combined_table(rows):
     """rows: [(service, q, jit), ...]"""
+    MODE_CN = {"enhanced": "增强10维", "static": "静态5维"}
     trs = ""
     for svc, q, jit in rows:
         quant_color = LEVEL_COLOR.get(q["level"], "#f9ab00")
         jit_color = JIT_COLOR.get(jit["prediction"], "#f9ab00")
         base = q["inputs"].get("base_risk") or "medium"
+        mode_cn = MODE_CN.get(q.get("mode"), "")
+        mode_span = (f"<span style='color:#888;font-size:11px'>{mode_cn}</span>"
+                     if mode_cn else "")
         trs += ("<tr><td style='padding:8px;border-bottom:1px solid #e8eaed;font-weight:600'>%s</td>"
                 "<td style='padding:8px;border-bottom:1px solid #e8eaed'>%s</td>"
                 "<td style='padding:8px;border-bottom:1px solid #e8eaed'>"
                 "<span style='display:inline-block;min-width:46px;text-align:center;padding:3px 10px;"
-                "border-radius:12px;color:#fff;background:%s;font-weight:700'>%s</span></td>"
+                "border-radius:12px;color:#fff;background:%s;font-weight:700'>%s</span> %s</td>"
                 "<td style='padding:8px;border-bottom:1px solid #e8eaed'>"
                 "<span style='display:inline-block;padding:3px 10px;border-radius:12px;color:#fff;"
                 "background:%s;font-weight:600;font-size:12px'>%s</span></td></tr>") % (
             esc(svc), RISK_LABEL.get(base, base), quant_color, q["percent"],
-            jit_color, esc(jit["prediction"]))
+            mode_span, jit_color, esc(jit["prediction"]))
     return ("""%s<div style="margin-top:18px">
       <div style="font-size:14px;font-weight:700;margin-bottom:8px">各服务量化风险评分 &amp; JIT 缺陷预测（apex 能力整合）</div>
       <table style="width:100%%;border-collapse:collapse;font-size:13px;background:#fff;border:1px solid #e8eaed;border-radius:8px;overflow:hidden">
@@ -187,11 +266,40 @@ def render_combined_table(rows):
     </div>%s""" % (COMBINED_START, trs, COMBINED_END))
 
 
+def _insert_before_body_end(html, frag):
+    """兜底插入：在 </body> 之前插入；无 </body> 则在 </html> 之前；都没有才追加。
+
+    ⚠️ 绝不能无脑 `html + frag` —— 那会把区块插到 </html> 之后（2026-09-18 实测：
+    综合报告的量化/JIT 汇总表因此跑到「⑥ 综合发布建议」之后，文档结构损坏）。
+    """
+    for mark in ("</body>", "</html>"):
+        i = html.rfind(mark)
+        if i != -1:
+            return html[:i] + frag + "\n" + html[i:]
+    return html + "\n" + frag
+
+
 def inject_combined(html, frag):
+    """幂等注入综合量化/JIT 汇总表。
+
+    2026-09-18 修复（幂等定位缺陷）：占位符只在**首次**存在，二次运行会被判定
+    「无占位符」而走追加分支 —— 结果把区块插到 </html> 之后。现改为：
+      ① 先记下旧块位置（若有）；
+      ② 占位符在 → 直接替换；
+      ③ 占位符不在但曾有旧块 → 插回旧块原位置；
+      ④ 都没有 → 插到 </body> 之前（绝不追加到文档末尾）。
+    """
+    old_pos = -1
+    m_old = re.search(re.escape(COMBINED_START) + r".*?" + re.escape(COMBINED_END), html, flags=re.S)
+    if m_old:
+        old_pos = m_old.start()
     html = re.sub(re.escape(COMBINED_START) + r".*?" + re.escape(COMBINED_END), "", html, flags=re.S)
+
     if COMBINED_PLACEHOLDER in html:
         return html.replace(COMBINED_PLACEHOLDER, frag)
-    return html + "\n" + frag
+    if old_pos != -1 and old_pos < len(html):
+        return html[:old_pos] + frag + html[old_pos:]
+    return _insert_before_body_end(html, frag)
 
 
 # ============================================================
@@ -228,12 +336,67 @@ def derive_stats_from_report(html):
 
 
 def derive_stats_for_combined(service, report_root):
-    """综合模式：取该服务最新独立报告 HTML 派生 stats。"""
+    """综合模式：取该服务最新独立报告 HTML 派生 stats（HTML 兜底路径）。"""
     pat = os.path.join(report_root, service, "*_变更影响分析报告.html")
     files = sorted(glob.glob(pat), key=os.path.getmtime, reverse=True)
     if not files:
         return None
     return derive_stats_from_report(open(files[0], encoding="utf-8").read())
+
+
+# ============================================================
+# 与趋势分同源：优先从 service_metrics.json 派生 stats
+# ============================================================
+def _report_version_range(report_path):
+    """从报告文件名解析版本区间：`{svc}_{from}_to_{to}_变更影响分析报告.html`。
+
+    返回 (from_raw, to_raw)，解析不出返回 (None, None)。
+    """
+    base = os.path.basename(report_path)
+    m = re.search(r"_([^_]+)_to_([^_]+)_", base)
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
+
+
+def stats_from_metrics(service, report_path, analytics_root):
+    """从 `service_metrics.json` 派生 stats（**与趋势分同源**）。
+
+    为什么必须有这条路（2026-09-18）：
+      `derive_stats_from_report()` 是「在 HTML 里数 `class="added"/"removed"` 的行数」
+      来估计 `total_lines`、数变更总览表行数来估计 `file_count`；
+      而趋势分（`metrics.risk_score`）用的是 service_metrics 里**权威的**
+      `lines_added` / `lines_removed` / `files_changed`。
+      两边不同源 → **同一份变更，报告里一个分、趋势图里另一个分**。
+      本函数让报告侧改吃同一份数据，口径才对得上。
+
+    匹配规则：用报告文件名里的 version_to，与 metrics 记录 `norm_version(version_to)`
+    比较（跨写法归一）；多条命中时取 `analysis_date` 最新的一条。
+
+    返回 (stats, note) 或 (None, 失败原因)。
+    """
+    _, to_raw = _report_version_range(report_path)
+    if not to_raw:
+        return None, "报告文件名不含 `_X_to_Y_` 版本区间，无法定位 metrics 记录"
+    want = norm_version(to_raw)
+    path = os.path.join(analytics_root, service, "service_metrics.json")
+    if not os.path.isfile(path):
+        return None, "service_metrics.json 不存在：%s" % path
+    try:
+        records = (json.load(open(path, encoding="utf-8")) or {}).get("records", [])
+    except Exception as e:
+        return None, "service_metrics.json 解析失败：%s" % e
+
+    hits = [r for r in records if norm_version(r.get("version_to")) == want]
+    if not hits:
+        return None, "service_metrics 里没有 version_to=%s 的记录（共 %d 条）" % (want, len(records))
+    hits.sort(key=lambda r: str(r.get("analysis_date") or ""), reverse=True)
+    rec = hits[0]
+    st = derive_stats_from_metrics(rec, service=service)
+    st["_source"] = "service_metrics.json:version_to=%s" % want
+    st["_rating"] = rec.get("rating") or {}
+    return st, "命中记录 %s→%s（analysis_date %s）" % (
+        rec.get("version_from"), rec.get("version_to"), rec.get("analysis_date"))
 
 
 # ============================================================
@@ -245,45 +408,85 @@ def main():
     ap.add_argument("--stats", help="stats JSON 文件路径（单服务）")
     ap.add_argument("--stats-json", help="stats JSON 字符串（单服务）")
     ap.add_argument("--auto", action="store_true", help="单服务：从报告 HTML 自动派生 stats（零配置）")
+    ap.add_argument("--from-metrics", action="store_true",
+                    help="单服务：优先从 service_metrics.json 派生 stats（**与趋势分同源**，需 --service）")
+    ap.add_argument("--service", help="服务名（配合 --from-metrics 定位 metrics 记录）")
+    ap.add_argument("--analytics-root", help="覆盖 diff-analytics 根目录")
     ap.add_argument("--combined", action="store_true", help="综合报告模式：按服务注入量化/JIT 汇总表")
     ap.add_argument("--services", nargs="+", help="综合模式服务列表 / 单服务增强模式的服务名")
     ap.add_argument("--workspace", default=r"d:/workbuddy/测试日常")
     ap.add_argument("--report-root", help="覆盖 report/code-diff 根目录（综合模式）")
+    ap.add_argument("--no-metrics", action="store_true",
+                    help="综合模式：强制用 HTML 派生（退回旧行为，仅排障用）")
     args = ap.parse_args()
+
+    analytics_root = args.analytics_root or os.path.join(
+        args.workspace, ".workbuddy", "diff-analytics")
 
     if args.combined:
         report_root = args.report_root or os.path.join(args.workspace, "report", "code-diff")
         if not args.services:
-            cdx_errors.die("--combined 需提供 --services", hint="例：--combined --services a b c", code=2)
+            print("ERROR: --combined 需提供 --services"); sys.exit(1)
         rows = []
         for svc in args.services:
-            st = derive_stats_for_combined(svc, report_root)
+            st, src = None, ""
+            if not args.no_metrics:
+                pat = os.path.join(report_root, svc, "*_变更影响分析报告.html")
+                found = sorted(glob.glob(pat), key=os.path.getmtime, reverse=True)
+                if found:
+                    st, reason = stats_from_metrics(svc, found[0], analytics_root)
+                    if st:
+                        src = "metrics"
+                    else:
+                        print("[WARN] %s 无法从 metrics 派生（%s），回退 HTML 派生" % (svc, reason))
+            if st is None:
+                st = derive_stats_for_combined(svc, report_root)
+                src = "html"
             if not st:
                 print("[WARN] 跳过 %s：未找到独立报告 HTML" % svc)
                 continue
+            # 2026-09-18 口径统一：综合表与单服务报告必须同一模式（增强10维，含历史度量），
+            # 否则综合表显示静态分、单服务横幅显示增强分，同一服务两个量化分。
+            if args.workspace and "historical_metrics" not in st:
+                h = auto_historical(svc, args.workspace)
+                if h:
+                    st["historical_metrics"] = h
             rows.append((svc, compute(st), generate_jit(st)))
+            print("INFO: %s stats 来源 = %s（%s 文件 / %s 行 / 模式 %s）"
+                  % (svc, src, st.get("file_count"), st.get("total_lines"),
+                     "增强10维" if "historical_metrics" in st else "静态5维"))
         if not rows:
-            cdx_errors.die("未派生到任何服务量化数据",
-                           "服务: %s\n报告根目录: %s" % (", ".join(args.services), report_root),
-                           hint="确认各服务已有独立报告 HTML（含变更总览指标）。", code=4)
-        html = cdx_errors.read_text(args.report, "综合报告 HTML（--report）")
+            print("[ERROR] 未派生到任何服务量化数据"); sys.exit(1)
+        html = open(args.report, encoding="utf-8").read()
         out = inject_combined(html, render_combined_table(rows))
-        open(args.report, "w", encoding="utf-8").write(out)
+        safe_write_report(args.report, out)
         print("OK: 综合报告注入 %d 个服务量化/JIT 汇总" % len(rows))
         return
 
     # —— 单服务 ——
-    html = cdx_errors.read_text(args.report, "报告 HTML（--report）",
-                                hint="先由上游生成报告 HTML，再注入量化评分。")
+    if not os.path.exists(args.report):
+        print("ERROR: 报告不存在 %s" % args.report); sys.exit(1)
+    html = open(args.report, encoding="utf-8").read()
 
     stats = None
     if args.stats:
-        stats = cdx_errors.read_json(args.stats, "stats JSON（--stats）")
+        stats = json.load(open(args.stats, encoding="utf-8"))
     elif args.stats_json:
-        stats = cdx_errors.parse_json_arg(args.stats_json, "stats JSON（--stats-json）")
+        stats = json.loads(args.stats_json)
+
+    if stats is None and args.from_metrics:
+        if not args.service:
+            print("ERROR: --from-metrics 需同时提供 --service"); sys.exit(1)
+        stats, note = stats_from_metrics(args.service, args.report, analytics_root)
+        if stats:
+            print("INFO: stats 来源 = service_metrics.json（%s）→ %d 文件 / %d 行"
+                  % (note, stats["file_count"], stats["total_lines"]))
+        else:
+            print("[WARN] 无法从 metrics 派生（%s），回退 HTML 派生" % note)
+
     if stats is None:
         stats = derive_stats_from_report(html)
-        print("INFO: --auto 派生 stats = %s" % json.dumps(stats, ensure_ascii=False))
+        print("INFO: HTML 派生 stats = %s" % json.dumps(stats, ensure_ascii=False))
 
     if args.services and args.workspace and "historical_metrics" not in stats:
         h = auto_historical(args.services[0], args.workspace)
@@ -294,10 +497,16 @@ def main():
     q = compute(stats)
     jit = generate_jit(stats)
     out = inject(html, q, jit)
-    open(args.report, "w", encoding="utf-8").write(out)
+    # 横幅评级同步（2026-09-18）：确定性评级与横幅定性不一致时，横幅跟随确定性评级
+    if stats.get("_rating"):
+        out, synced = sync_banner_rating(out, stats["_rating"])
+        if synced:
+            print("INFO: 风险横幅评级已同步为确定性评级 %s（原定性保留于括号内）"
+                  % (stats["_rating"].get("code"),))
+    safe_write_report(args.report, out)
     print("OK: 合并量化评分(%s分/%s)+JIT(%s) 进风险横幅，详情卡置于变更总览前 → %s" % (
         q["percent"], q["level"], jit["prediction"], args.report))
 
 
 if __name__ == "__main__":
-    cdx_errors.guard(main)
+    main()

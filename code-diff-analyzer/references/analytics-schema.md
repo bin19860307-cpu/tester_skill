@@ -61,15 +61,28 @@
 | `records[].metrics.high_risk` | number | ✅ | 高风险项数 |
 | `records[].metrics.medium_risk` | number | ✅ | 中风险项数 |
 | `records[].metrics.low_risk` | number | ✅ | 低风险项数 |
-| `records[].metrics.risk_score` | number | ✅ | 综合风险评分（0-100） |
+| `records[].metrics.risk_score` | number | ✅ | 综合风险评分（0-100）· **静态五维**，趋势唯一口径 |
+| `records[].metrics.risk_score_mode` | string | ✅ | 固定 `"static"`；被写进 `"enhanced"` 即为口径污染 |
+| `records[].metrics.risk_score_source` | string | ✅ | 血缘：`script:scoring.canonical_risk_score(静态5维)` |
+| `records[].metrics.risk_score_enhanced` | number\|null | ❌ | 增强十维分（有历史度量时写入），**禁止参与趋势连线** |
+| `records[].metrics.risk_score_legacy` | number | ❌ | 旧公式值，**仅留审计**，不得当作当前分使用 |
 | `records[].modules` | array | ❌ | 模块级汇总 |
 | `records[].detections` | object | ✅ | 五项专项检测命中结果 |
 
-### risk_score 计算公式
+### risk_score 口径（2026-09-18 起）
+
+`risk_score` 由 `scripts/scoring.py::canonical_risk_score()` **确定性产出**，不再由 LLM 手填：
 
 ```
-risk_score = min(100, high_risk * 10 + medium_risk * 5 + low_risk * 1)
+metrics.risk_score            ← 静态 5 维确定性分（0-100），趋势唯一口径，跨版本可比
+metrics.risk_score_enhanced   ← 增强 10 维分（有历史度量时才写），不可与上者混用
+metrics.risk_score_legacy     ← 旧公式值 min(100, high*10 + medium*5 + low*1)，仅留档审计
 ```
+
+> ⚠️ `min(100, high*10 + medium*5 + low*1)` 是**已弃用的旧公式**，其值只以
+> `risk_score_legacy` 形式留档。任何文档、报告或 PPT 若把该公式当作 `risk_score` 的口径，
+> 都属于过期口径。写盘后必须满足：`risk_score_mode == "static"`，且落盘值 == 用当前
+> 评分代码重算的结果（容差 0.01）——由 `scripts/doctor.py` 的 D5 检查项机器校验。
 
 ---
 
