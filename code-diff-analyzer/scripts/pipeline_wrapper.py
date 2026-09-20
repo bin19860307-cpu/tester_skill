@@ -59,6 +59,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # 便于 Jenkins / GitLab CI 用 returnCode==2 精准判定「前置语义分析未就绪」，而非笼统失败。
 EXIT_HANDOFF_MISSING = 2
 
+# 超时保护（R 运行稳定性）：子脚本与 git clone 均设超时，避免磁盘/网络卡顿挂死流水线。
+# 可由命令行 --timeout / --git-timeout 覆盖。
+SCRIPT_TIMEOUT = 600
+GIT_TIMEOUT = 180
+
 SCRIPTS = {
     "bug_correlate": os.path.join(HERE, "bug_correlate.py"),
     "bug_trend": os.path.join(HERE, "bug_trend.py"),
@@ -72,13 +77,18 @@ def _py():
 
 
 def run_py(script_name, *args):
-    """以当前解释器运行兄弟脚本，任一非零退出码即中止整条流水线。"""
+    """以当前解释器运行兄弟脚本，任一非零退出码或超时即中止整条流水线。"""
     if script_name not in SCRIPTS:
         print(f"[ERROR] 未知脚本: {script_name}")
         sys.exit(1)
     cmd = [_py(), SCRIPTS[script_name]] + list(args)
     print("\n>>> " + " ".join(cmd))
-    r = subprocess.run(cmd)
+    try:
+        r = subprocess.run(cmd, timeout=SCRIPT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print(f"[TIMEOUT] '{script_name}' 超过 {SCRIPT_TIMEOUT}s 未完成，已中止。")
+        print("          常见原因：磁盘 / 网络卡顿或输入过大；可用 --timeout 调大后重试。")
+        sys.exit(1)
     if r.returncode != 0:
         print(f"[FAIL] '{script_name}' 退出码 {r.returncode}，流水线中止。")
         sys.exit(r.returncode)
@@ -132,9 +142,17 @@ def stage_analyze(args):
             cmd += ["--branch", branch]
         cmd += [args.repo_url, clone_dir]
         print("\n>>> " + " ".join(cmd))
-        r = subprocess.run(cmd)
-        if r.returncode != 0:
-            print(f"[WARN] git clone 非零退出码 {r.returncode}，仅记录不影响后续")
+        try:
+            r = subprocess.run(cmd, timeout=GIT_TIMEOUT)
+            if r.returncode != 0:
+                print(f"[WARN] git clone 非零退出码 {r.returncode}，仅记录不影响后续")
+        except subprocess.TimeoutExpired:
+            print(f"[WARN] git clone 超过 {GIT_TIMEOUT}s 未完成（网络卡顿？），已跳过，仅归档用途不影响后续。")
+            print("       可用 --git-timeout 调大后重试。")
+        except FileNotFoundError:
+            print("[WARN] 未找到 git 命令，跳过浅克隆（仅归档用途不影响后续）。")
+        except OSError as e:
+            print(f"[WARN] git clone 无法执行（{e}），已跳过，仅归档用途不影响后续。")
 
     write_run_meta(analytics_root, args.service, args)
 
@@ -215,6 +233,7 @@ def stage_report(args):
 
 
 def main():
+    global SCRIPT_TIMEOUT, GIT_TIMEOUT
     ap = argparse.ArgumentParser(
         description="Code Diff Analyzer 流水线统一入口（编排 4 个固化脚本）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -237,6 +256,10 @@ def main():
     ap.add_argument("--git-depth", type=int, default=100, help="浅克隆历史深度（默认 100）")
     ap.add_argument("--allow-missing-metrics", action="store_true",
                     help="analyze 交接产物(service_metrics.json)缺失时不阻断（手动 / 开发豁免通道）")
+    ap.add_argument("--timeout", type=int, default=SCRIPT_TIMEOUT,
+                    help="单个子脚本执行超时秒数（默认 %d）" % SCRIPT_TIMEOUT)
+    ap.add_argument("--git-timeout", type=int, default=GIT_TIMEOUT,
+                    help="git clone 超时秒数（默认 %d）" % GIT_TIMEOUT)
     # score 阶段
     ap.add_argument("--xlsx", help="TAPD Bug 导出 Excel（bug_correlate 输入）")
     ap.add_argument("--trend-out", help="Bug 趋势报告输出路径（缺省自动生成）")
@@ -245,6 +268,9 @@ def main():
     ap.add_argument("--p1-data-file", help="P1 用例 JSON 文件（gen_p1_cases 输入）")
     ap.add_argument("--p1-report", help="P1 用例注入目标报告（单服务时需显式指定）")
     args = ap.parse_args()
+
+    SCRIPT_TIMEOUT = args.timeout
+    GIT_TIMEOUT = args.git_timeout
 
     if args.stage == "analyze":
         stage_analyze(args)

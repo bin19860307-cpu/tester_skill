@@ -109,7 +109,7 @@ def read_text(path, label="文件", hint=None):
             hint="请用 UTF-8 编码另存后再试（勿用 GBK/ANSI）。", code=4)
     except OSError as e:
         die("%s读取失败: %s" % (label, ap), str(e),
-            hint="检查文件是否被其他程序占用或权限不足。", code=4)
+            hint="检查文件是否被占用或权限不足；若在网络盘/云盘上，也可能是读取超时，稍后重试。", code=4)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ def read_json(path, label="JSON 文件", hint=None, allow_missing=False, default
             hint="另存为 UTF-8（无 BOM）后重试；可能是二进制或 GBK 文件。", code=4)
     except OSError as e:
         die("%s读取失败: %s" % (label, ap), str(e),
-            hint="检查文件是否被占用或权限不足。", code=4)
+            hint="检查文件是否被占用或权限不足；若在网络盘/云盘上，也可能是读取超时，稍后重试。", code=4)
     if raw.strip() == "":
         die("%s是空文件: %s" % (label, ap),
             hint="该文件应为合法 JSON（通常是本工具上一步的产出）。", code=4)

@@ -69,13 +69,20 @@ openpyxl>=3.1.0
 | `scripts/verify_precision.py` | 用真实命中率校准评分权重（把「规则引擎」升级为「项目校准模型」） |
 
 ## 参考资源
+- `references/analysis-rules.md`
 - `references/analytics-schema.md`
 - `references/changelog.md`
+- `references/ci-pipeline.md`
+- `references/data-sink.md`
+- `references/faq.md`
+- `references/flows-abc.md`
 - `references/html-report-template.html`
 - `references/init-analytics.md`
 - `references/output-examples.md`
 - `references/prompt-template.md`
 - `references/quant-jit-spec.md`
+- `references/report-format.md`
+- `references/report-injection.md`
 
 ## 目录结构
 ```text
@@ -89,7 +96,7 @@ code-diff-analyzer/
 
 ## 版本
 
-当前 v1.1.2。
+当前 v1.1.3。
 
 ## 许可
 
