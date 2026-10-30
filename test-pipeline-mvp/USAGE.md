@@ -228,6 +228,24 @@ python scripts/eval_metrics.py \
 
 ---
 
+### 5.5 三个脚本各管什么
+
+| 脚本 | 什么时候用 | 依赖 |
+|---|---|---|
+| `scripts/extract_pdf_images.py` | 需求是 PDF，且里面有流程图/原型图截图 | 零依赖（装 PyMuPDF 后支持全格式） |
+| `scripts/review_testcases.py` | Phase 6 评审前，想先机器扫一遍用例质量 | 零依赖 |
+| `scripts/eval_metrics.py` | 有首跑与封版两版用例后，算三率 | 读 CSV 零依赖；读 xlsx 需 openpyxl |
+
+```bash
+# 取图
+python scripts/extract_pdf_images.py 需求.pdf --out pdf-images
+# 评审
+python scripts/review_testcases.py testcases.json stats
+python scripts/review_testcases.py testcases.json duplicates
+```
+
+---
+
 ## 6. 参数与适配
 
 评测脚本支持不同模板与命名规范：
@@ -267,7 +285,7 @@ A：这是人工卡点设计。**不要跳过 Phase 1（需求补全）和 Phase
 **Q：需求不全，能直接生成吗？**
 A：会生成，但 Agent 会先追问缺失信息。需求文档缺失关键规则时，明确说"按你的假设生成并标注假设"，它会把假设列出来供你核对。
 
-**Q：跑 `eval_metrics.py` 报 `ModuleNotFoundError: openpyxl`？**
+**Q：跑 `scripts/eval_metrics.py` 报 `ModuleNotFoundError: openpyxl`？**
 A：说明你喂的是 `.xlsx`。两条路：`pip install openpyxl`，或把两份用例另存为 `.csv` 再跑（CSV 走标准库，不需要任何第三方包）。只用流水线对话则完全不需要它。
 
 **Q：三率算出来留存很低，是 Skill 不行吗？**

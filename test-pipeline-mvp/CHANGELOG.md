@@ -34,3 +34,21 @@
 
 ### 评测结果
 （内部评测数据已剔除，三率数据请基于你自己的基准集运行 `scripts/eval_metrics.py` 计算）
+
+## v2.7.1（2026-10-30）发布收口 — 补齐内置资源、消除悬空引用
+
+> 本轮**不改流水线规则**，只修「包内自称有、实际没有」的资源与引用，属于发布质量修复。
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| PDF 取图脚本 | SKILL.md 要求执行 `scripts/extract_pdf_images.py`，包内不存在 | 已实现（xref 优先，无 PyMuPDF 时降级扫 JPEG 流；MD5 去重 + 质量过滤 + `manifest.json` 回溯） |
+| 用例评审脚本 | 要求执行 `scripts/review_testcases.py`，包内不存在 | 已实现（`stats`：优先级/套件/字段完整率/步骤↔预期编号配对；`duplicates`：重名 + bigram 近似重复） |
+| 对抗性评审模板（六） | 正文引用该模板，无处可查 | 落地为 `references/phase6-adversarial-review-template.md`（失败日志三分法 + 三角色挑刺 + 8 项核对） |
+| 18 列规范 | Phase 5.4 「委派外部技能」，包内无规范 | 内置 `references/phase5_4-excel-18col-spec.md`（18 列结构 / 编号规则 / 17 条红线 / 5 项机器校验），技能自包含 |
+| 数据安全 SOP | 指向本机 `.workbuddy/harness-sop/...`，包外路径 | 脱敏后内置 `references/data-safety-sop.md` |
+| 合并验证标注 | 写入「测试过程」列，与红线 17 冲突 | 改写入「描述」列 |
+| 悬空引用 | 6 处内部文档/模块名示例 | 全部改为通用表述 |
+
+**指标影响**：规则未变，三率基线不变（`baseline/eval-result.json` 仍为 留存 25.0% / 修改 62.5% / 删除 12.5% / 缺口 12.5%）。
+
+**新增脚本的验证**：`scripts/review_testcases.py` 用 3 条样例数据验证统计与编号配对检出；`scripts/extract_pdf_images.py` 用构造 PDF（同一张 1920×1080 JPEG 嵌入两次）验证「发现 2 → 保留 1（去重）+ 质量过滤生效」，零第三方依赖路径已跑通。

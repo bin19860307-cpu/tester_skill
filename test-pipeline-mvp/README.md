@@ -95,7 +95,18 @@ python scripts/eval_metrics.py --first baseline/demo/first-run.csv --final basel
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/eval_metrics.py` | 计算首跑→封版的留存率/修改率/删除率三率指标 |
+| `scripts/eval_metrics.py` | 计算首跑→封版的留存率/修改率/删除率三率指标（支持 xlsx / csv） |
+| `scripts/extract_pdf_images.py` | 从需求 PDF 提取内嵌流程图/原型图：xref 精确提取 + MD5 去重 + 质量过滤，输出 `manifest.json` 便于回溯 |
+| `scripts/review_testcases.py` | 用例资产机械评审：`stats` 出优先级/套件/字段完整率/步骤↔预期编号配对，`duplicates` 查重名与近似重复 |
+
+## 配套技能（可选）
+
+本技能**自包含**，不装任何其他技能也能完整跑通（18 列企业模板规范已内置在 `references/phase5_4-excel-18col-spec.md`）。
+
+若你同时安装了 `excel-testcase-18col`（企业 18 列用例生成器），可以把「18 列 Excel 落地」这一步交给它执行——它对三表结构（测试用例 / 文案基线 / 链接基线）、行高计算、生成后机器校验做得更细。两者关系：
+
+- 只装本技能：按内置规范生成 18 列，够用
+- 两个都装：本技能负责测试点与评审，18 列落地交给更专精的执行器
 
 ## 参考资源
 
@@ -115,7 +126,7 @@ test-pipeline-mvp/
 ├── eval/             # 评测体系方法说明
 ├── baseline/         # 版本基线快照 + 通用示例数据
 ├── references/       # 各阶段参考文档
-├── scripts/          # 评测指标脚本
+├── scripts/          # 评测指标 / PDF 取图 / 用例评审 三个零依赖脚本
 ├── README.md
 ├── manifest.yaml
 └── LICENSE
