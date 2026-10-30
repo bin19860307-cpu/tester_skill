@@ -13,8 +13,10 @@
 | `eval-result.json` | 三率评测结果（由 `scripts/eval_metrics.py` 生成） |
 | `skill-version.json` | 基线冻结时的 Skill 版本与关键文件清单 |
 | `model-version.json` | 基线冻结时使用的模型 / Agent 及版本（换模型后三率不可直接对比） |
-| `demo/first-run.xlsx` | 示例：AI 首跑生成用例（含典型首跑瑕疵） |
-| `demo/final.xlsx` | 示例：人工评审封版用例（标准答案） |
+| `demo/first-run.csv` | 示例：AI 首跑生成用例（含典型首跑瑕疵） |
+| `demo/final.csv` | 示例：人工评审封版用例（标准答案） |
+
+> 示例数据用 **CSV**（纯文本）而非 xlsx：一是任何平台/仓库都接受文本文件，二是读 CSV 走 Python 标准库、**不需要装 openpyxl**，装完即可验证链路。你自己的真实数据仍可用 xlsx，脚本同时支持两种格式。
 
 ## 立即验证（三条命令）
 
@@ -23,13 +25,13 @@ cd test-pipeline-mvp
 
 # 1. 用示例数据重算三率，对比现有 eval-result.json
 python scripts/eval_metrics.py \
-  --first baseline/demo/first-run.xlsx \
-  --final baseline/demo/final.xlsx
+  --first baseline/demo/first-run.csv \
+  --final baseline/demo/final.csv
 
 # 2. 覆盖写入（确认无误后再执行）
 python scripts/eval_metrics.py \
-  --first baseline/demo/first-run.xlsx \
-  --final baseline/demo/final.xlsx \
+  --first baseline/demo/first-run.csv \
+  --final baseline/demo/final.csv \
   --out baseline/eval-result.json
 
 # 3. 查看结果

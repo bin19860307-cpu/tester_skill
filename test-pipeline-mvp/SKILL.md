@@ -1132,9 +1132,9 @@ test-pipeline-mvp（主流水线 v2.12）
 | **删除率** | 首跑到封版被测试人员删除的占比 | 删除数 / N |
 
 - **解读**：留存率越高 = AI 首跑质量越高（少改少删）；修改率/删除率升高 = 该需求/该轮首跑质量下降，需排查。
-- **计算**：`scripts/eval_metrics.py --first <首跑.xlsx> --final <封版.xlsx> [--group-col 测试套件] [--out ../baseline/eval-result.json]`
+- **计算**：`scripts/eval_metrics.py --first <首跑.xlsx|csv> --final <封版.xlsx|csv> [--group-col 测试套件] [--out ../baseline/eval-result.json]`
   - 按「用例名称」（回退「用例编号」）对齐两版，逐条判定 留存/修改/删除/新增。
-  - 依赖 openpyxl（系统 Python 3.12 已带；managed venv 需 `pip install openpyxl`）。
+  - 支持 `.xlsx/.xlsm`（需 openpyxl）与 `.csv/.tsv`（标准库，零依赖）；`baseline/demo/` 自带 CSV 示例数据可直接跑通。
 
 ### B.5 评测后必须同步 Obsidian（★ 2026-08-14 用户硬性要求）
 

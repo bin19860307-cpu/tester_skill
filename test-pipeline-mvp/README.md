@@ -85,7 +85,7 @@ npx skills add bin19860307-cpu/tester_skill --skill test-pipeline-mvp
 开箱验证（自带通用示例数据，无需准备任何材料）：
 
 ```bash
-python scripts/eval_metrics.py --first baseline/demo/first-run.xlsx --final baseline/demo/final.xlsx
+python scripts/eval_metrics.py --first baseline/demo/first-run.csv --final baseline/demo/final.csv
 ```
 
 > 预期：留存 25.0% / 修改 62.5%（轻改 2、重改 3）/ 删除 12.5% / 缺口 12.5%。

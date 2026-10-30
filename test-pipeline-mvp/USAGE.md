@@ -183,8 +183,8 @@ Agent 会列出**缺失信息**（字段校验规则、权限、异常提示文�
 cd test-pipeline-mvp
 
 python scripts/eval_metrics.py \
-  --first baseline/demo/first-run.xlsx \
-  --final baseline/demo/final.xlsx
+  --first baseline/demo/first-run.csv \
+  --final baseline/demo/final.csv
 ```
 
 预期输出：
@@ -198,7 +198,7 @@ python scripts/eval_metrics.py \
 封版新增(缺口)    1  | 缺口率   : 12.5%
 ```
 
-> 依赖：`pip install openpyxl`（仅评测脚本需要，纯对话使用不需要任何依赖）
+> **依赖**：读 `.xlsx` 需 `pip install openpyxl`；读 `.csv` / `.tsv` 走标准库，**零依赖**（上面示例就是 CSV，装完即可跑）。纯对话使用流水线不需要任何依赖。
 
 ### 5.3 建立你自己的基线（4 步）
 
@@ -268,7 +268,7 @@ A：这是人工卡点设计。**不要跳过 Phase 1（需求补全）和 Phase
 A：会生成，但 Agent 会先追问缺失信息。需求文档缺失关键规则时，明确说"按你的假设生成并标注假设"，它会把假设列出来供你核对。
 
 **Q：跑 `eval_metrics.py` 报 `ModuleNotFoundError: openpyxl`？**
-A：`pip install openpyxl`。只用流水线对话不需要它。
+A：说明你喂的是 `.xlsx`。两条路：`pip install openpyxl`，或把两份用例另存为 `.csv` 再跑（CSV 走标准库，不需要任何第三方包）。只用流水线对话则完全不需要它。
 
 **Q：三率算出来留存很低，是 Skill 不行吗？**
 A：先排除口径问题——封版是否真的逐条评审过、是否换了模型、首跑是否被人工干预过。留存率低通常指向两个具体缺陷：预置条件过简、预期不可验证。这两个正是 Phase 1 补全和 Phase 5 生成的重点。
@@ -295,8 +295,8 @@ test-pipeline-mvp/
 │   ├── skill-version.json            # Skill 版本快照
 │   ├── model-version.json            # 模型版本记录
 │   └── demo/
-│       ├── first-run.xlsx            # 示例首跑用例
-│       └── final.xlsx                # 示例封版用例
+│       ├── first-run.csv             # 示例首跑用例（纯文本，免开 Excel）
+│       └── final.csv                 # 示例封版用例
 ├── references/
 │   ├── phase1-prompt.md              # Phase 1 需求分析提示词
 │   ├── phase1_5-flowchart-guide.md   # 流程图绘制指南

@@ -17,8 +17,10 @@ eval_metrics.py — AI 用例生成评测：留存率 / 修改率 / 删除率
 用法：
   python eval_metrics.py --first 首跑.xlsx --final 封版.xlsx
   python eval_metrics.py --first a.xlsx --final b.xlsx --group-col 测试套件 --out ../baseline/eval-result.json
+  python eval_metrics.py --first 首跑.csv --final 封版.csv          # CSV 无需第三方依赖
 
-依赖：openpyxl（系统 Python 3.12 已带；managed venv 需 pip install openpyxl）
+支持格式：.xlsx / .xlsm（需 openpyxl）、.csv / .tsv（标准库，无依赖）
+依赖：openpyxl 仅在读取 Excel 时需要；managed venv 需 pip install openpyxl
 """
 import argparse
 import json
@@ -28,9 +30,8 @@ import sys
 
 try:
     from openpyxl import load_workbook
-except ImportError:
-    sys.stderr.write("缺少 openpyxl，请先安装：pip install openpyxl\n")
-    sys.exit(2)
+except ImportError:  # 仅 .csv/.tsv 场景可不装
+    load_workbook = None
 
 
 def _norm(v):
@@ -48,10 +49,25 @@ def _col_index(header, names):
     return -1
 
 
-def _read_cases(path, name_cols, content_cols, group_col, entity_col="", entity_val="", name_strip=""):
+def _read_rows(path):
+    """读取表格为「行元组」列表：.xlsx/.xlsm 走 openpyxl，.csv/.tsv 走标准库。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".csv", ".tsv"):
+        import csv
+        delim = "\t" if ext == ".tsv" else ","
+        # utf-8-sig：兼容 Excel 另存的带 BOM 的 CSV
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            return [tuple(r) for r in csv.reader(f, delimiter=delim)]
+    if load_workbook is None:
+        raise SystemExit(
+            f"读取 {ext} 文件需要 openpyxl，请先安装：pip install openpyxl\n"
+            f"（或把用例另存为 .csv 再跑，CSV 无需第三方依赖）")
     wb = load_workbook(path, read_only=True, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
+    return list(wb.active.iter_rows(values_only=True))
+
+
+def _read_cases(path, name_cols, content_cols, group_col, entity_col="", entity_val="", name_strip=""):
+    rows = _read_rows(path)
     if not rows:
         return [], {}
     header = [str(c) if c is not None else "" for c in rows[0]]
