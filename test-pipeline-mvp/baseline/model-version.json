@@ -1,0 +1,7 @@
+{
+  "model": "your-agent-model",
+  "model_version": "1.0.0",
+  "provider": "示例（请替换为实际使用的模型与版本）",
+  "note": "记录生成用例所用的模型 / Agent 及其版本，保证跨迭代评测可比（换了模型，三率不可直接对比）。本示例数据未绑定具体模型。",
+  "pilot": true
+}

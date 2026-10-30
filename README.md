@@ -11,8 +11,9 @@
 | [`bug-analysis`](./bug-analysis/) | Bug 列表 Excel 多维量化分析：返工率、修复周期、一次解决率、模块分布，直出测试报告素材 | 1 个 Python 脚本（pandas） |
 | [`excel-testcase-18col`](./excel-testcase-18col/) | 企业 18 列标准测试用例 Excel 生成：基线驱动、步骤与预期 1:1 配对 | 2 个 Python 脚本（可选） |
 | [`web-test-case-generator`](./web-test-case-generator/) | 网页自动生成测试用例：UI/功能/流程/异常/权限/兼容性 | 纯指令，零依赖 |
+| [`test-pipeline-mvp`](./test-pipeline-mvp/) | 测试工程全流程流水线：一句话需求 → 需求分析 → 测试点 → 评审 → 用例 → Excel 交付，含覆盖率验证与三率评测体系 | 1 个 Python 脚本（可选） |
 
-**组合使用**：code-diff-analyzer 分析变更 → excel-testcase-18col 生成正式用例 → web-test-case-generator 补页面级用例 → bug-analysis 沉淀缺陷数据，形成测试工程闭环。
+**组合使用**：code-diff-analyzer 分析变更 → test-pipeline-mvp 从需求生成测试点与用例 → excel-testcase-18col 输出正式 18 列用例 → bug-analysis 沉淀缺陷数据，形成测试工程闭环。
 
 **怎么选**：日常影响分析用基础版；需要量化评分或缺陷倾向预判时用增强版。两者输入格式完全一致，可平滑切换。
 
@@ -23,6 +24,7 @@
 ```bash
 npx skills add bin19860307-cpu/tester_skill --skill code-diff-analyzer
 npx skills add bin19860307-cpu/tester_skill --skill apex-diff-analyzer
+npx skills add bin19860307-cpu/tester_skill --skill test-pipeline-mvp
 ```
 
 > 镜像仓库（GitLab）：https://gitlab.com/bin19860307/tester_skill — 技能内容完全一致；技能安装命令基于 GitHub，镜像仅作备份与国内访问加速。
@@ -49,6 +51,11 @@ tester_skill/
 │   └── references/
 ├── apex-diff-analyzer/
 │   ├── SKILL.md
+│   └── references/
+├── test-pipeline-mvp/
+│   ├── SKILL.md
+│   ├── eval/
+│   ├── scripts/
 │   └── references/
 └── README.md
 ```

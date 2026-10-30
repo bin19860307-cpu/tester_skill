@@ -1,0 +1,25 @@
+name: test-pipeline-mvp
+display_name: Chane · 测试工程全流程流水线
+display_name_en: Test Pipeline MVP
+version: 2.7.0
+author: Chane
+category: 测试提效
+description_zh: 测试工程全流程 MVP 流水线。从一句话需求出发，自动完成需求分析、需求拆解、测试点生成、测试点评审、测试用例生成、测试用例评审、测试用例修改与确认的全套测试工程活动，内置覆盖率验证、三层交叉验证与 Excel 导出，支持需求变更后的增量补充与查漏补缺。
+description_en: Full-process test engineering pipeline. Starting from a one-line requirement, it automatically performs requirement analysis, breakdown, test point generation and review, test case generation, review, modification and confirmation, with coverage verification, three-layer cross validation and Excel export, supporting incremental updates after requirement changes.
+description: "测试工程全流程 MVP 流水线（合并版）。整合团队模式与 PDF 图片提取、三层交叉验证能力。支持从一句话需求或需求文档（PDF/Word/Markdown）出发，自动完成需求分析、需求拆解、测试点生成、测试点评审、测试用例生成、测试用例评审、测试用例修改、测试用例确认的全套测试工程活动。触发词：测试流水线、测试工程、一句话需求生成用例、需求分析测试、全流程测试生成、端到端测试流程、生成测试用例、需求变更、增量补充、查漏补缺、覆盖率分析、导出Excel。"
+triggers:
+  - 生成测试用例
+  - 跑一下测试流水线
+  - 一句话需求生成用例
+  - 需求分析测试
+  - 覆盖率分析
+  - 需求变更 增量补充
+  - 导出Excel 用例
+tags:
+  - testing
+  - test-case
+  - requirement-analysis
+  - coverage
+  - quality
+  - agent-skill
+license: MIT

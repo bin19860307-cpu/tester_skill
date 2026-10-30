@@ -1,0 +1,17 @@
+{
+  "skill": "test-pipeline-mvp",
+  "skill_version": "2.7.0",
+  "excel_18col_version": "2.0.0",
+  "frozen_at": "2026-10-30",
+  "frozen_by": "示例基线（由 baseline/demo 的通用示例数据生成，非真实业务评测）",
+  "pilot": true,
+  "review_type": "demo",
+  "note": "本文件为公开版示例快照：数据来自 baseline/demo/ 的通用示例（用户管理模块，虚构数据），仅用于演示评测流程与 JSON schema。建立你自己的基线时，请替换为真实封版结果，并同步更新 ../CHANGELOG.md。",
+  "files_snapshot": [
+    "SKILL.md",
+    "scripts/eval_metrics.py",
+    "baseline/demo/first-run.xlsx",
+    "baseline/demo/final.xlsx",
+    "baseline/eval-result.json"
+  ]
+}

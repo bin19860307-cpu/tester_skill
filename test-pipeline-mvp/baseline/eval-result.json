@@ -1,0 +1,16 @@
+{
+  "total_first_pass_cases": 8,
+  "retained": 2,
+  "modified": 5,
+  "light_modified": 2,
+  "heavy_modified": 3,
+  "deleted": 1,
+  "added": 1,
+  "final_total": 8,
+  "fuzzy_merged_renamed": 0,
+  "retention_rate": 0.25,
+  "modification_rate": 0.625,
+  "deletion_rate": 0.125,
+  "gap_rate": 0.125,
+  "per_requirement": {}
+}
