@@ -41,6 +41,21 @@ LEGACY_FORMULA = "min(100, high*10 + medium*5 + low*1)"
 # 1.0 → 1.1（2026-09-18）：R3/R4/R5 阈值重标定，见 rate_change() docstring
 RATING_RULES_VERSION = "1.1"
 
+# 置信度规则版本号（2026-09-30 新增，缺口①）：规则一改就 +1
+# 1.0：输入完整度扣分 + 分数/评级一致性 + 校准支持度三分量合成
+CONFIDENCE_RULES_VERSION = "1.0"
+
+# 置信度分流阈值（Jev 判断层思路：按置信度决定「自动分流 / 建议复核」）
+#   high   ≥ 0.75 → 可按分数阈值自动分流
+#   medium ≥ 0.55 → 建议抽查后再分流
+#   low    < 0.55 → 不自动分流，必须人工复核
+CONF_HIGH, CONF_MEDIUM = 0.75, 0.55
+
+# 校准支持度的两级门槛：与 verify_precision.MIN_SAMPLES_FOR_CALIBRATION 同级
+#   ≥ CONF_CAL_MIN_FULL（30）→ 完整校准 1.0；≥ CONF_CAL_MIN_TEMP（10）→ 线性插值；<10 → 趋零
+CONF_CAL_MIN_FULL = 30
+CONF_CAL_MIN_TEMP = 10
+
 # 规模阈值 —— 与 quant_jit_risk.generate_jit() 已公开的口径保持一致
 # （那里是：>400 行建议拆 PR、>10 文件「跨文件风险较高」、>5 文件「涉及多个文件」），
 # 全技能只此一套阈值，避免同一件事在报告里出现两种判定。
@@ -136,8 +151,140 @@ def derive_stats(record, service=None):
     }
 
 
-def canonical_risk_score(record, historical=None, service=None):
+def estimate_confidence(record, calibration=None):
+    """确定性置信度估算（缺口①，2026-09-30）——「这个分数可信到什么程度」。
+
+    与 risk_score 回答两个不同的问题：
+      risk_score   = 这次变更有多危险？（风险大小）
+      confidence   = 我们对这个判断本身有多确信？（判断质量）
+
+    结构合法 ≠ 语义正确（Jev "Zero Hallucinations" 的教训同理）：分数是规则算出来的，
+    但**喂给规则的输入可能残缺**。输入残缺时分数照样能算出来，却不该被拿去自动分流。
+
+    三个分量（全部可复现，无 ML）：
+
+      ① 输入完整度（0-1，权重 0.5）——逐项检查评分与评级实际消费的字段：
+           metrics.files_changed / lines_added / lines_removed
+           modules（非空，且每条有 name+risk）
+           files（非空路径清单）
+           detections（五项检测键齐全）
+         每缺一项按比例扣分。输入越全，分数越能反映真实风险。
+
+      ② 信号一致性（0-1，权重 0.3）——risk_score 与 rate_change 是两条独立链路，
+         若「分数等级」与「规则评级」严重背离（如 80 分高危险却被 R7 判成纯样式低风险），
+         说明某条链路的输入或规则有问题，置信度必须下调。
+
+      ③ 校准支持度（0-1，权重 0.2）——verify_precision 的样本量决定「分数↔出Bug率」
+         这层关系有没有被验证过。没验证过 ≠ 错，但只能算「未校准的先验」。
+         calibration=None（未提供）视为 0.5 中性值并显式标注。
+
+    返回 {
+      "confidence": 0.62,            # 0-1 两位小数
+      "confidence_level": "medium",  # high(≥0.75) / medium(≥0.55) / low
+      "routing": "review_then_auto" | "auto" | "manual",
+      "components": {...},           # 三分量各自取值与依据，供报告展示
+      "reasons": [...],              # 每一项扣分都有可读解释
+      "rules_version": "1.0",
+    }
+    """
+    rec = record or {}
+    m = rec.get("metrics") or {}
+    modules = rec.get("modules") or []
+    files = rec.get("files") or []
+    detections = rec.get("detections") or {}
+    reasons = []
+
+    # ---- ① 输入完整度 ----
+    checks = {
+        "files_changed": int(m.get("files_changed") or 0) > 0,
+        "lines_added": m.get("lines_added") is not None,
+        "lines_removed": m.get("lines_removed") is not None,
+        "modules_nonempty": bool(modules),
+        "modules_wellformed": bool(modules) and all(
+            (mod or {}).get("name") and (mod or {}).get("risk") for mod in modules),
+        "files_nonempty": bool(files),
+        "detections_complete": all(k in detections for k in
+                                   ("data_format_change", "version_rollback",
+                                    "sensitive_info", "test_sync_needed",
+                                    "circular_dependency")),
+    }
+    passed = sum(1 for ok in checks.values() if ok)
+    completeness = round(passed / len(checks), 3)
+    _LABEL = {
+        "files_changed": "metrics.files_changed", "lines_added": "metrics.lines_added",
+        "lines_removed": "metrics.lines_removed", "modules_nonempty": "modules 非空",
+        "modules_wellformed": "modules 均含 name+risk", "files_nonempty": "files 路径清单",
+        "detections_complete": "detections 五项齐全",
+    }
+    for k, ok in checks.items():
+        if not ok:
+            reasons.append("输入缺失：%s" % _LABEL[k])
+
+    # ---- ② 信号一致性 ----
+    # 注意：这里直接走底层 qjr.compute(derive_stats(...))，不能再调 canonical_risk_score
+    # —— 那样会形成 canonical → confidence → canonical 的无限递归。
+    q = qjr.compute(derive_stats(dict(rec)))
+    rating = rate_change(dict(rec))
+    score_band = ("high" if q["percent"] >= 75
+                  else "medium" if q["percent"] >= 50 else "low")
+    rating_code = rating.get("code")
+    if {score_band, rating_code} == {"high", "low"}:
+        consistency = 0.3
+        reasons.append("信号背离：分数判 %s（%.0f 分）但规则评级判 %s（%s）"
+                       % (score_band, q["percent"], rating_code,
+                          "/".join(rating.get("reasons") or []) or "无规则命中"))
+    elif score_band != rating_code:
+        consistency = 0.6
+        reasons.append("信号不一致：分数档 %s 与评级 %s 不同档（相邻档，降权观察）"
+                       % (score_band, rating_code))
+    else:
+        consistency = 1.0
+
+    # ---- ③ 校准支持度 ----
+    if calibration is None:
+        calibration_support = 0.5
+        reasons.append("校准状态：未提供 verify_precision 样本量，按未校准中性值 0.5 计")
+    else:
+        n = int(calibration.get("samples") or 0)
+        if n >= CONF_CAL_MIN_FULL:
+            calibration_support = 1.0
+        elif n >= CONF_CAL_MIN_TEMP:
+            calibration_support = round(0.5 + 0.5 * (n - CONF_CAL_MIN_TEMP)
+                                        / (CONF_CAL_MIN_FULL - CONF_CAL_MIN_TEMP), 3)
+        else:
+            calibration_support = round(0.5 * max(n, 0) / CONF_CAL_MIN_TEMP, 3)
+        if n < CONF_CAL_MIN_FULL:
+            reasons.append("校准不足：verify_precision 有效样本 %d 个（完整校准需 %d）"
+                           % (n, CONF_CAL_MIN_FULL))
+
+    confidence = round(0.5 * completeness + 0.3 * consistency + 0.2 * calibration_support, 3)
+    level = ("high" if confidence >= CONF_HIGH
+             else "medium" if confidence >= CONF_MEDIUM else "low")
+    routing = {"high": "auto", "medium": "review_then_auto", "low": "manual"}[level]
+
+    return {
+        "confidence": confidence,
+        "confidence_level": level,
+        "routing": routing,
+        "components": {
+            "input_completeness": {"value": completeness, "weight": 0.5,
+                                   "checks_passed": "%d/%d" % (passed, len(checks))},
+            "signal_consistency": {"value": consistency, "weight": 0.3,
+                                   "score_band": score_band, "rating_code": rating_code},
+            "calibration_support": {"value": calibration_support, "weight": 0.2,
+                                    "samples": (calibration or {}).get("samples")},
+        },
+        "reasons": reasons,
+        "rules_version": CONFIDENCE_RULES_VERSION,
+    }
+
+
+def canonical_risk_score(record, historical=None, service=None, calibration=None):
     """确定性计算该记录的 0-100 risk_score（唯一真源）。
+
+    2026-09-30（缺口①）新增可选参数 calibration：
+      传 {"samples": <verify_precision 有效样本数>} 时，置信度的校准分量按真实
+      样本量计算；不传按未校准中性值 0.5 处理（显式标注，不算错也不算对）。
 
     返回：
       {
@@ -145,7 +292,8 @@ def canonical_risk_score(record, historical=None, service=None):
         "risk_level": "🔴 高风险",
         "scoring_mode": "static" | "enhanced",
         "score_engine": "quant_jit_risk.compute",
-        "rating_rules_version": "1.0",
+        "rating_rules_version": "1.1",
+        "confidence": {...},           # 独立置信度 + 分流建议（见 estimate_confidence）
         "dimensions": {...}, "contributions": {...}, "inputs": {...},
         "legacy": {"risk_score_legacy": 37, "formula": ...}
       }
@@ -180,6 +328,7 @@ def canonical_risk_score(record, historical=None, service=None):
         "scoring_mode": q["mode"],
         "score_engine": "quant_jit_risk.compute",
         "rating_rules_version": RATING_RULES_VERSION,
+        "confidence": estimate_confidence(record, calibration=calibration),
         "dimensions": q["dimensions"],
         "contributions": q["contributions"],
         "inputs": q["inputs"],
@@ -317,6 +466,7 @@ def main():
     out = canonical_risk_score(demo, service="portal-backend")
     print(json.dumps(out, ensure_ascii=False, indent=2))
     print("评级:", json.dumps(rate_change(demo), ensure_ascii=False))
+    print("置信度:", json.dumps(out["confidence"], ensure_ascii=False))
     print("风格变更判定:", json.dumps(rate_change(
         {"metrics": {"files_changed": 1, "lines_added": 5, "lines_removed": 2}},
         paths=["src/style/theme.scss"]), ensure_ascii=False))

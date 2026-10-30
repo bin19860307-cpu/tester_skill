@@ -49,7 +49,7 @@
 python scripts/sync_analytics.py --service <svc>     # 重建 file_history + 归一版本键 + 重算 risk_score
 python scripts/sync_analytics.py --all --backfill    # 全部服务；--backfill 从历史报告回填 files（仅限可完整还原的）
 python scripts/sync_analytics.py --service <svc> --check    # 只自检不改动
-python scripts/doctor.py --all                       # 一键体检 D1–D9（只读）
+python scripts/doctor.py --all                       # 一键体检 D1–D10（只读）
 python scripts/doctor.py --all --fix --move-temp     # 体检 + 自动修复 + 临时产物移入 _trash/（可逆）
 python scripts/verify_precision.py --all             # 精度标定（样本 < 30 时拒绝给权重建议）
 python -m pytest scripts/tests/ -q                   # 回归；项数以当前测试输出为准

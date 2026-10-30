@@ -5,6 +5,27 @@
 
 > 设计演进可追溯。每次对 Skill 的逻辑 / 脚本 / 文档做实质改动，在此追加一条（最新在上），便于复盘「更新过程」。
 
+- **2026-09-30 · v1.2.0 · 判断层三缺口收口（Jev 学习沉淀落地）**
+  - 背景：2026-09-23 学习《Jev 火了，测试工程师真正该关注什么？》后归纳出三个待补缺口（见工作区 `结构性总结/20260923_Jev与判断层-测试工程师该关注什么.md`）：① risk_score 只有分值没有独立置信度；② Langfuse 只做观测没有判断层；③ verify_precision 样本阈值"拍"、doctor D8 缺跨口径漂移回归。本次一次性收口。
+  - ① **独立置信度 + 阈值分流**（`scoring.py`）：
+    - 新增 `estimate_confidence()`（规则版本 `CONFIDENCE_RULES_VERSION="1.0"`）：三分量合成——输入完整度 0.5（七项检查逐项可解释）+ 信号一致性 0.3（risk_score 分数档 vs rate_change 评级档背离即扣分）+ 校准支持度 0.2（verify_precision 样本量线性映射；未提供按 0.5 中性并显式标注）。
+    - 分流阈值：high ≥0.75 → `auto`（按分数阈值自动分流）；medium ≥0.55 → `review_then_auto`（抽查后分流）；low → `manual`（人工复核）。
+    - `canonical_risk_score()` 返回值新增 `confidence` 块；`sync_analytics.rescore_records()` 随重算落盘 `metrics.risk_confidence`。设计原则：**分数答"多危险"，置信度答"对这个判断本身有多确信"**——输入残缺时分数照样能算，但不该被拿去自动分流（对应 Jev "schema 合法 ≠ 语义正确" 的教训）。
+    - 修复过程中踩过并已解决的坑：`estimate_confidence` 内部误调 `canonical_risk_score` 造成无限递归（改走底层 `qjr.compute(derive_stats(...))`）；`qjr.compute` 返回键是 `percent` 不是 `risk_score`。
+  - ② **Agent Trace 四级判断层**（新增 `trace_judge.py`，纯规则零 LLM）：
+    - 输入 trace 聚合 JSON（数组或 `{"traces":[...]}`，字段全可选），输出四级：`normal`（正常）/ `minor`（轻微异常）/ `needs_review`（需人工）/ `critical`（高风险）+ 逐条信号清单 + 升级清单 + 批次分布。
+    - 规则要点：错误/空产出/评分偏离 >0.15 → needs_review；连续失败 ≥3、敏感面出错、慢+错、工具调用 ≥20（疑似循环）→ critical；轻微信号 ≥3 叠加升级 needs_review；批次 p95 自适应（不覆盖用户显式阈值）。
+    - `--out` 判定 JSON / `--md` Markdown 报告 / 阈值可用 `--threshold-slow|--threshold-p95` 调。浮点边界已用 `round(...,6)` 消噪（0.80-0.65≠0.15 的经典坑）。规则版本 `RULES_VERSION="1.0"` 写进产物。
+    - 定位：四层分工（规则确定性/决策模型判断/LLM 复杂推理/人工兜底）中的规则层——只分流不归因，needs_review/critical 的根因仍由人或 LLM 完成。Langfuse 导出 JSON 转 `{traces:[...]}` 后即可消费。
+  - ③a **verify_precision 分级结论**：原 `<30 一刀切拒答` 的阈值无依据，改三级——`full`（≥30，完整建议）/ `temp`（10-29，方向性建议 + 每条附 Wilson 95% 区间 + 显式声明"不得据此做最终权重调整"）/ `none`（<10，只诊断）。新增 `wilson_interval()`（95%，含负二项修正与 clamp）；分桶 bug_rate、检测精度、Bug 命中率全部带区间。30 的出处：比例结论 95% CI 半宽 ≤±18%（p≈0.5）。
+    - **修复 Wilson 公式实现错误**：原把 `z²/4n` 先除 `denom` 再开方，half 被多除 √denom——8/10 算出 [0,1] 全宽（正确应 [49%,94%]）。已改为标准式 `z·sqrt(p(1-p)/n + z²/4n²)/denom`，并由 `test_known_values` 等教科书值锁死。另修 f-string 里 `[{lo:.0%}, {hi:.0%]}]` 的 `]` 误入格式说明符问题（改预拼字符串）与 render 里字面 `95%` 未转义 `%` 导致的 format 崩溃。
+  - ③b **doctor 新增 D10 跨版本/跨口径漂移**（D8 只答"当前代码 vs 落盘"，不答"这批数据是否同一口径"）：
+    - 按 provenance（`rating_rules_version` × `risk_score_mode`）分组：组内独立跑"落盘==重算"断言；>1 组共存时报告"跨口径不可比，趋势须分段或统一重算后再连线"；无 provenance 的老数据归 unknown 组并提示 `--fix` 补血缘。只报告不判错（混口径是数据状态而非代码缺陷）。
+    - 已接入 `run_doctor` 主流程（D8 之后），真实数据冒烟：6 服务全过，portal-backend/manage-frontend 各有 1 条老数据缺 rules_version 的提示路径可用。
+  - 测试：新增 `tests/test_trace_judge.py`（20 项）、`tests/test_verify_precision.py`（14 项）、`test_doctor.py` 增 TestD10（5 项）、`test_scoring.py` 增置信度组（9 项）、`test_sync_analytics.py` 增落盘断言（1 项）。全量 **260 passed**（原 196）。
+  - 真实数据冒烟：doctor --all 只读全过（exit 0）；verify_precision --all 实测样本 10 → 正确落入 temp 档（测试同步 30% CI [11%,60%]、命中率 50% CI [27%,73%]，单调性通过）。
+  - 口径提醒：`risk_confidence` 是新字段，历史记录 rescore 后才有；趋势/报告如引用置信度需先 `doctor --all --fix`。
+
 - **2026-09-20 · v1.1.3 · 文档可用性重构 + 报告效果实证 + P2 健壮性（回应 SkillHub 评测 A/C 低分）**
   - 背景：SkillHub 五维评测 **T 5.0 / R 4.5 / A 4.4 / C 4.4 / E 4.7**，短板集中在文档与稳定性——A·触发方式 4.3、C·反模式与 FAQ 4.3、C·渐进式披露 4.3、C·结构清晰 4.4、R·运行稳定性 4.3。核心问题是主文档 **1257 行过长、细则与规则混排、缺"报告长什么样"与集中 FAQ**。本次为一次**纯文档 + 轻健壮性**改动，不改任何分析口径。
   - ① **SKILL.md 瘦身重构（1257 → 453 行）**：新增七个面向使用者的章节——「能力边界与适用性」（✅适用 / ❌不适用 / 📏规模与限制三栏）、「触发条件」（必触发 / 按需触发 / 不触发三层表）、「分析流程总览」（Step 1–7 必做 / 按需标注 + 最小路径 / 完整路径 + ASCII 流程）、「脚本编排与数据流」（编排 4 / 共 12 + ASCII 数据流 + 基础能力模块表）、「输出与报告示例」（内嵌 2 张真实报告截图）、「高频用法」（recipe 速查表）、「常见问题（速查）」。原 Step 5b/6/7 细则、流程 A/B/C、CI 章节**逐字下沉**至 references，主文档只留规则 + 流程 + 指针。

@@ -17,6 +17,13 @@ doctor.py — diff-analytics 一键体检 / 修复
   D8 分数可复现性     落盘 risk_score 是否等于「用当前评分代码重算」的结果
                      （评分规则一改、数据没重算 → D5 全绿但分数已失真，故必须有此项）
   D9 数据目录卫生     服务数据目录里的 `*.json.bak` / `*.tmp` 残留（D7 的镜像）
+  D10 跨版本漂移      按 provenance（rating_rules_version × risk_score_mode）分组：
+                      ① 组内可复现性（各组独立跑 D8 断言）
+                      ② 跨组可比性 —— 不同规则版本/评分模式的记录，分数与评级
+                         分布不可直接混比（口径不同）；混在一张趋势图里就是漂移
+                     （D8 只回答「当前代码 vs 落盘」，不回答「这批数据是几个口径
+                      产出的」——2026-09-23 缺口③b：doctor.py D8 只覆盖同模型可
+                      复现，缺跨模型/跨版本漂移回归）
 
 修复动作（`--fix`）：
   · 重建 file_history（委托 sync_analytics，幂等，不破坏缺 `files` 清单的历史区间）
@@ -259,6 +266,80 @@ def check_d8_reproducible(service, analytics_root):
             "detail": {"records_with_score": checked, "stale": len(stale)}}
 
 
+def check_d10_version_drift(service, analytics_root):
+    """D10 跨版本/跨口径漂移（缺口③b，2026-09-30）。
+
+    D8 的盲区：它拿「当前代码」重算所有记录 —— 全部通过只说明**现在**的代码
+    能复现这些分数，不说明这批分数是**同一个口径**产出的。两次规则版本、
+    static/enhanced 两种模式混在同一服务里时：
+      · 分数分布不可直接连线（权重不同，分差来自口径而非风险）
+      · 评级分布不可直接对比（R3/R4 阈值在 rules 1.0→1.1 之间变过）
+
+    检查（只报告不判错——混口径是数据状态而非代码缺陷）：
+      ① 按 provenance 分组：rating_rules_version × risk_score_mode
+      ② 各组独立跑「落盘==重算」断言（组内可复现性）
+      ③ >1 组时提示「跨口径不可比」，列出各组的分数/评级分布摘要
+      ④ provenance 键缺失的记录单独归为 "unknown" 组（老数据 rescore 前的状态）
+    """
+    svc = os.path.join(analytics_root, service)
+    sm = sa.load_json(os.path.join(svc, "service_metrics.json")) or {}
+    try:
+        import scoring
+    except ImportError:
+        return {"id": "D10", "name": "跨版本漂移", "issues": ["D10 无法导入 scoring 模块"],
+                "detail": {}}
+
+    groups = {}
+    for r in sm.get("records", []):
+        m = r.get("metrics") or {}
+        if m.get("risk_score") is None:
+            continue
+        key = ("rules=%s" % (m.get("rating_rules_version") or "unknown"),
+               "mode=%s" % (m.get("risk_score_mode") or "unknown"))
+        groups.setdefault(" / ".join(key), []).append(r)
+
+    issues, group_stats = [], {}
+    for gkey, recs in sorted(groups.items()):
+        stale = []
+        for r in recs:
+            m = r.get("metrics") or {}
+            tag = f"{r.get('version_from')}→{r.get('version_to')}"
+            try:
+                out = scoring.canonical_risk_score(dict(r))
+            except Exception as e:
+                stale.append(f"{tag}(重算异常 {e})")
+                continue
+            if abs(float(out["risk_score"]) - float(m["risk_score"])) > 0.01:
+                stale.append(f"{tag}(落盘 {m['risk_score']} / 重算 {out['risk_score']})")
+        if stale:
+            issues.append(f"D10 [{gkey}] {len(stale)} 条组内不可复现：{stale[:3]}")
+        scores = [float((r.get("metrics") or {}).get("risk_score") or 0) for r in recs]
+        ratings = {}
+        for r in recs:
+            code = ((r.get("rating") or {}) if isinstance(r.get("rating"), dict)
+                    else {}).get("code") or str(r.get("rating") or "?")
+            ratings[code] = ratings.get(code, 0) + 1
+        group_stats[gkey] = {
+            "n": len(recs),
+            "reproducible": len(recs) - len(stale),
+            "score_range": [min(scores), max(scores)] if scores else None,
+            "rating_distribution": ratings,
+        }
+
+    if len(group_stats) > 1:
+        desc = "; ".join(f"{k}(n={v['n']}, 分数 {v['score_range'][0]:.0f}~{v['score_range'][1]:.0f})"
+                         for k, v in sorted(group_stats.items()))
+        issues.append(f"D10 {len(group_stats)} 种口径共存，跨组分数/评级不可直接混比"
+                      f"（趋势须按口径分段或重算统一后再连线）：{desc}")
+    if any(k.startswith("rules=unknown") or "mode=unknown" in k
+           for k in group_stats):
+        issues.append("D10 存在无 provenance 的记录（rules/mode 未知，疑为 rescore 前的老数据）"
+                      "→ 建议跑 doctor --fix 或 sync_analytics 补齐血缘")
+
+    return {"id": "D10", "name": "跨版本漂移", "issues": issues,
+            "detail": {"groups": len(group_stats), "group_stats": group_stats}}
+
+
 def check_d6_orphans(service, analytics_root):
     """D6 孤儿文件（version_bugs 不存在却留着 cross_reference）。
 
@@ -443,6 +524,7 @@ def run_doctor(services, analytics_root, report_root, fix=False, move_temp=False
             check_d6_orphans(svc, analytics_root),
             check_d7_hygiene(report_root, svc),
             check_d8_reproducible(svc, analytics_root),
+            check_d10_version_drift(svc, analytics_root),
             check_d9_data_dir_hygiene(analytics_root, svc),
         ]
         entry = {"service": svc, "checks": checks,
@@ -458,6 +540,7 @@ def run_doctor(services, analytics_root, report_root, fix=False, move_temp=False
                 check_d6_orphans(svc, analytics_root),
                 check_d7_hygiene(report_root, svc),
                 check_d8_reproducible(svc, analytics_root),
+            check_d10_version_drift(svc, analytics_root),
                 check_d9_data_dir_hygiene(analytics_root, svc),
             ]
             entry["issues_after"] = sum(len(c["issues"]) for c in entry["checks_after"])

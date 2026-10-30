@@ -631,6 +631,9 @@ def rescore_records(service, analytics_root):
         m["risk_score_mode"] = "static"
         m["risk_score_source"] = "script:scoring.canonical_risk_score(静态5维)"
         m["rating_rules_version"] = static["rating_rules_version"]
+        # 缺口①（2026-09-30）：独立置信度 + 分流建议随 rescore 一并落盘。
+        # 与分数同级持久化，趋势/报告按 confidence_level 决定是否自动分流。
+        m["risk_confidence"] = static["confidence"]
 
         if hist:
             enh = scoring.canonical_risk_score(rec, historical=hist, service=service)
@@ -655,7 +658,8 @@ def rescore_records(service, analytics_root):
     metrics["risk_score_policy"] = (
         "risk_score = 静态5维确定性分（趋势唯一口径，跨模式可比）；"
         "risk_score_enhanced = 增强10维分（不参与趋势连线）；"
-        "risk_score_legacy = 旧公式值（仅审计）")
+        "risk_score_legacy = 旧公式值（仅审计）；"
+        "risk_confidence = 独立置信度（高≥0.75 自动分流 / 中 0.55-0.75 抽查后分流 / 低<0.55 人工复核）")
     write_json(mp, metrics)
     return {"service": service, "rescored": rescored, "detail": detail,
             "has_historical": bool(hist)}

@@ -1,6 +1,6 @@
 ---
 name: code-diff-analyzer
-version: "1.1.3"
+version: "1.2.0"
 display_name: Chane · 代码变更影响分析
 display_name_en: Code Diff Analyzer
 description_zh: 代码变更影响分析技能。解析 git diff、tagdiff.txt、compare_vX_to_Y.md 等变更输入，识别受影响模块、评估风险等级、规划测试范围，支持自动生成 HTML 变更报告与多服务综合 Bug 趋势分析。
@@ -179,6 +179,14 @@ python scripts/scoring.py          # 自检输出：量化分 + 评级 + 评级�
 - **上下文增强**：可在报告中补充叙事（如「虽命中 R1 但实为工具函数」），但**不得覆盖脚本结论**。
 - **若认为脚本评级不符**：先看 `rate_change()` 返回的 `reasons`；需调规则时改代码并升 `RATING_RULES_VERSION`，改完对全部服务重跑 `doctor.py --all --fix`。阈值 1.0→1.1 的重标定原因见 `references/changelog.md`。
 
+### Step 5c — 置信度与分流（v1.2.0 起，随 Step 5 自动产出）
+
+- **分数答"多危险"，置信度答"对这个判断有多确信"**——两者独立，缺一不可。输入残缺（无 files / modules 空 / detections 不全）时分数照样能算，但不该被拿去自动分流。
+- `canonical_risk_score()` 返回 `confidence` 块（`scoring.estimate_confidence()`，规则版本 `CONFIDENCE_RULES_VERSION`），三分量：输入完整度 0.5 + 分数/评级一致性 0.3 + 校准支持度 0.2（verify_precision 样本量映射，未提供按 0.5 中性标注）。
+- 分流：`confidence_level` **high**（≥0.75）→ 可按分数阈值自动分流；**medium**（0.55–0.75）→ 抽查后分流；**low**（<0.55）→ 人工复核，**报告中必须如实展示 reasons**。
+- 落盘：rescore 后写在 `metrics.risk_confidence`；引用前确认记录已重算。
+- **Agent Trace 判断**（观测→判断的另一条线）：Langfuse 等导出的 trace 聚合 JSON 用 `python scripts/trace_judge.py --in traces.json --md report.md` 做四级分流（正常/轻微异常/需人工/高风险），只有后两级升级人工。纯规则零 LLM。
+
 ### Step 5b — 专项校验（必须执行）
 
 五项必查，命中即在报告「专项检测结果」节输出：
@@ -224,13 +232,13 @@ python scripts/scoring.py          # 自检输出：量化分 + 评级 + 评级�
 ```bash
 python scripts/sync_analytics.py --service <svc>          # 重建 file_history + 归一版本键 + 重算 risk_score
 python scripts/sync_analytics.py --all --backfill         # 全部服务；--backfill 从历史报告回填 files（仅可完整还原的）
-python scripts/doctor.py --all                            # 一键体检 D1–D9（只读）
+python scripts/doctor.py --all                            # 一键体检 D1–D10（只读）
 python scripts/doctor.py --all --fix --move-temp          # 体检 + 自动修复 + 临时产物移入 _trash/（可逆）
 python scripts/verify_precision.py --all                  # 精度标定（样本 < 30 拒绝给权重建议）
 python -m pytest scripts/tests/ -q                        # 回归；项数以当前输出为准
 ```
 
-**何时必跑**：① 改了 `scoring.py` / `quant_jit_risk.py` 评分规则 → 必须 `--all --fix` 重算；② 报告分与最新代码不一致（**D8 会报**）→ 同上；③ 交报告前跑一次 `doctor --all`。
+**何时必跑**：① 改了 `scoring.py` / `quant_jit_risk.py` 评分规则 → 必须 `--all --fix` 重算；② 报告分与最新代码不一致（**D8 会报**）→ 同上；③ 趋势/报告把不同时期的记录画在同一条线里 → 先看 **D10**（跨规则版本/跨模式口径漂移）；④ 交报告前跑一次 `doctor --all`。
 
 > 存储位置细节、写入步骤（6.2.1–6.2.3 各文件字段）、写入校验 → `references/data-sink.md`；Schema 定义见 `references/analytics-schema.md`。
 
@@ -341,14 +349,14 @@ python scripts/gen_combined_report.py --services 服务A 服务B 服务C --works
 | 模块 | 职责 | 为什么必须共用 |
 |---|---|---|
 | `scripts/_common.py` | 版本键归一 `norm_version()`；路径过滤 `is_junk_path()` / `filter_change_files()` | 写法不一致曾致 **Bug↔变更 0 关联**；过滤口径分散会破坏条目数自检 |
-| `scripts/scoring.py` | 唯一 `risk_score` 口径 `canonical_risk_score()`；R1–R7 评级 `rate_change()` | 曾两套分并存且由 LLM 手填，同一 diff 两次跑可能不同等级 |
+| `scripts/scoring.py` | 唯一 `risk_score` 口径 `canonical_risk_score()`；R1–R7 评级 `rate_change()`；独立置信度 `estimate_confidence()`（v1.2.0） | 曾两套分并存且由 LLM 手填，同一 diff 两次跑可能不同等级 |
 | `scripts/sync_analytics.py` | file_history 重建 / 版本键归一 / risk_score 重算 | 手工维护导致条目非确定性丢失 |
-| `scripts/doctor.py` | 一键体检 D1–D9 + 可逆修复 | **D8 专抓「代码改了数据没重算」** |
+| `scripts/doctor.py` | 一键体检 D1–D10 + 可逆修复 | **D8 专抓「代码改了数据没重算」；D10（v1.2.0）专抓「跨规则版本/跨评分模式口径漂移」** |
 | `scripts/verify_precision.py` | 真实命中率 / 检测精度 / 权重建议（样本<30 拒绝） | 让「精度」可被度量 |
 | `scripts/cdx_errors.py` | 统一友好错误层：`read_json` / `read_text` / `open_xlsx` / `guard` | 把原生 traceback 转为「文件+行列+成因+修复建议」的中文提示 |
 | `scripts/tests/` | pytest 回归集（合成工作区复刻历史缺陷） | 锁死「0 关联」「空壳 mapping」等回归 |
 
-**其余脚本一览**：`bug_correlate` `bug_trend` `gen_combined_report` `gen_p1_cases`（编排内）；`gen_bug_predict` `gen_quant_jit` `quant_jit_risk` `gen_midscene_yaml` `doctor` `sync_analytics` `verify_precision` `pack_reports`（按需）。`cdx_errors` / `_common` / `scoring` 为共用模块。
+**其余脚本一览**：`bug_correlate` `bug_trend` `gen_combined_report` `gen_p1_cases`（编排内）；`gen_bug_predict` `gen_quant_jit` `quant_jit_risk` `gen_midscene_yaml` `doctor` `sync_analytics` `verify_precision` `pack_reports` `trace_judge`（按需）。`cdx_errors` / `_common` / `scoring` 为共用模块。
 
 ---
 

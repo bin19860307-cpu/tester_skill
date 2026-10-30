@@ -50,9 +50,42 @@ DETECTION_LABEL = {
     "sensitive_info": "敏感信息", "test_sync_needed": "测试同步",
     "circular_dependency": "循环依赖",
 }
-# 最小可信样本量：低于此值只诊断、不调权重
+# 样本量分级（缺口③a，2026-09-30 重标定）：
+#   ≥ FULL（30）→ 完整权重建议（原有行为）
+#   ≥ TEMP（10）→ 临时结论：给方向性建议，但每条附 Wilson 95% 区间标注不确定性
+#   <  TEMP    → 只诊断不给建议（原「拍脑袋的 30」改为有依据的三级）
+# 30 的出处：比例型结论 95% 置信区间半宽 ≤ ±18%（p≈0.5 时），是工程上可接受的最低门槛。
 MIN_SAMPLES_FOR_CALIBRATION = 30
+MIN_SAMPLES_TEMP = 10
 BUCKET_EDGES = [0, 40, 55, 70, 85, 101]      # 低/较低/中/较高/高
+
+
+def wilson_interval(k, n, z=1.96):
+    """Wilson score 区间（95%）：小样本比例的诚实表达，优于裸比率。
+
+    返回 (lo, hi)；n=0 时返回 (None, None)。k/n=命中率。
+    用途：任何「x/y 命中率」结论都必须带着区间说话 ——
+    3/5=60% 的区间是 [23%, 88%]，裸写 60% 是自欺。
+    """
+    if not n:
+        return None, None
+    p = k / n
+    z2 = z * z
+    denom = 1 + z2 / n
+    center = (p + z2 / (2 * n)) / denom
+    # 标准 Wilson：half = z * sqrt(p(1-p)/n + z²/4n²) / (1 + z²/n)
+    # （曾误写成先把 z²/4n 除以 denom 再开方 → half 被多除 √denom，8/10 算出 [0,1] 全宽）
+    half = z * ((p * (1 - p) / n + z2 / (4 * n * n)) ** 0.5) / denom
+    return round(max(0.0, center - half), 3), round(min(1.0, center + half), 3)
+
+
+def _conclusion_level(n):
+    """样本量 → 结论级别：full（完整建议）/ temp（临时结论）/ none（只诊断）。"""
+    if n >= MIN_SAMPLES_FOR_CALIBRATION:
+        return "full"
+    if n >= MIN_SAMPLES_TEMP:
+        return "temp"
+    return "none"
 
 
 def collect_samples(services, analytics_root):
@@ -122,7 +155,9 @@ def aggregate(samples):
         "detection_precision": det,
         "attribution": samples[0]["attribution"] if samples else None,
         "samples_enough": n >= MIN_SAMPLES_FOR_CALIBRATION,
+        "conclusion_level": _conclusion_level(n),
         "min_samples_for_calibration": MIN_SAMPLES_FOR_CALIBRATION,
+        "min_samples_temp": MIN_SAMPLES_TEMP,
     }
 
 
@@ -135,16 +170,18 @@ def bucket_calibration(samples, edges=None):
     scored = [s for s in samples if s.get("risk_score") is not None]
     buckets = []
     for i in range(len(edges) - 1):
-        lo, hi = edges[i], edges[i + 1]
-        grp = [s for s in scored if lo <= s["risk_score"] < hi]
+        lo_edge, hi_edge = edges[i], edges[i + 1]
+        grp = [s for s in scored if lo_edge <= s["risk_score"] < hi_edge]
         if not grp:
-            buckets.append({"bucket": f"[{lo},{hi})", "n": 0, "bug_rate": None,
+            buckets.append({"bucket": f"[{lo_edge},{hi_edge})", "n": 0, "bug_rate": None,
                             "avg_score": None})
             continue
         b = sum(1 for s in grp if s["has_bug"])
+        lo, hi = wilson_interval(b, len(grp))
         buckets.append({
-            "bucket": f"[{lo},{hi})", "n": len(grp), "with_bug": b,
+            "bucket": f"[{lo_edge},{hi_edge})", "n": len(grp), "with_bug": b,
             "bug_rate": round(b / len(grp), 3),
+            "bug_rate_ci": [lo, hi],
             "avg_score": round(sum(s["risk_score"] for s in grp) / len(grp), 1),
         })
     # 单调性：相邻有效桶的 bug_rate 是否非递减
@@ -195,14 +232,24 @@ def _spearman(x, y):
 
 
 def suggest_weights(agg, calib):
-    """③ 权重建议。样本不足时**只给诊断，不给建议**。"""
-    if not agg["samples_enough"]:
+    """③ 权重建议（缺口③a 分级版，2026-09-30）。
+
+    旧版 <30 一刀切拒答 —— 阈值本身没有依据，且把「10 个样本能看出的
+    明显方向」也一起扔掉了。现改三级：
+      full（≥30）：完整建议（原有行为）
+      temp（10-29）：方向性建议 + 每条附 Wilson 95% 区间，显式声明临时性
+      none（<10）：只诊断不给建议（样本过少连方向都不可信）
+    """
+    n = agg["samples"]
+    level = _conclusion_level(n)
+
+    if level == "none":
         return {
-            "available": False,
-            "reason": (f"有效样本仅 {agg['samples']} 个，低于校准门槛 "
-                       f"{MIN_SAMPLES_FOR_CALIBRATION} 个 → 不做权重调整建议，"
-                       "避免用少量样本拟合出看似权威的参数"),
-            "next_step": "继续按规范落盘分析记录（每次分析都会被映射引擎消费），样本充足后重跑本脚本",
+            "available": False, "level": level,
+            "reason": (f"有效样本仅 {n} 个，低于临时结论门槛 {MIN_SAMPLES_TEMP} 个"
+                       f"（完整校准需 {MIN_SAMPLES_FOR_CALIBRATION}）→ 样本过少，"
+                       "连方向性结论都不可信，只提供诊断数据"),
+            "next_step": "继续按规范落盘分析记录；达到 10 个后本脚本会给出带区间的临时结论",
         }
 
     recs = []
@@ -213,24 +260,42 @@ def suggest_weights(agg, calib):
                          "reason": f"命中样本仅 {d['hit_total']} 次，不足以判断"})
             continue
         p = d["precision"]
+        lo, hi = wilson_interval(d["hit_with_bug"], d["hit_total"])
+        band = (f"（Wilson 95% CI [{lo * 100:.0f}%, {hi * 100:.0f}%]）"
+                if lo is not None else "")
         if p is not None and p < 0.3:
             recs.append({"item": d["label"], "action": "review",
                          "reason": f"命中 {d['hit_total']} 次、其中有 Bug 仅 {d['hit_with_bug']} 次"
-                                   f"（精度 {p:.0%}）→ 该检测规则可能误报偏高，建议复核阈值"})
+                                   f"（精度 {p:.0%}）{band}→ 该检测规则可能误报偏高，建议复核阈值"})
         else:
             recs.append({"item": d["label"], "action": "keep",
-                         "reason": f"精度 {p:.0%}（{d['hit_with_bug']}/{d['hit_total']}）"})
+                         "reason": f"精度 {p:.0%}（{d['hit_with_bug']}/{d['hit_total']}）{band}"})
     # Bug 维度：实测 hit_rate 偏离先验（0.5）越远，权重越该调
     hr = agg["high_risk_hit_rate"]
     if hr is not None:
+        lo, hi = wilson_interval(agg["high_risk_with_bug"], agg["high_risk_total"])
+        band = (f"（Wilson 95% CI [{lo * 100:.0f}%, {hi * 100:.0f}%]）"
+                if lo is not None else "")
         recs.append({
             "item": "Bug未解决率维度权重(buggy=0.15)",
             "action": "keep" if hr >= 0.5 else "reduce",
             "reason": f"实测高风险变更命中率 {hr:.0%}（{agg['high_risk_with_bug']}/"
-                      f"{agg['high_risk_total']}）"
+                      f"{agg['high_risk_total']}）{band}"
                       + ("，区分度良好" if hr >= 0.5 else "，区分度不足，建议下调该维权重"),
         })
-    return {"available": True, "recommendations": recs,
+
+    if level == "temp":
+        return {
+            "available": True, "level": level,
+            "recommendations": recs,
+            "calibration_ok": calib["monotonic"],
+            "note": (f"⚠️ 临时结论（样本 {n} 个，介于 {MIN_SAMPLES_TEMP}-{MIN_SAMPLES_FOR_CALIBRATION}）："
+                     "方向可供参考，但每条区间较宽，**不得据此做最终权重调整**；"
+                     + ("分桶单调性未通过 → 优先补样本再重估" if not calib["monotonic"]
+                        else "分桶单调性暂通过 → 继续积累样本后复核")),
+        }
+
+    return {"available": True, "level": level, "recommendations": recs,
             "calibration_ok": calib["monotonic"],
             "note": ("分桶单调性未通过 → 权重需整体重估" if not calib["monotonic"]
                      else "分桶单调性通过 → 现有权重排序有效")}
@@ -267,11 +332,13 @@ def render(agg, calib, sug, services):
     L.append("")
     L.append("## 三、分桶校准检验（分数排序有效性）")
     L.append("")
-    L.append("| 分数桶 | 样本数 | 出 Bug 数 | 真实出 Bug 率 | 桶内均分 |")
-    L.append("|---|---|---|---|---|")
+    L.append("| 分数桶 | 样本数 | 出 Bug 数 | 真实出 Bug 率 | 95% 区间 | 桶内均分 |")
+    L.append("|---|---|---|---|---|---|")
     for b in calib["buckets"]:
         br = f"{b['bug_rate']:.0%}" if b["bug_rate"] is not None else "—"
-        L.append(f"| {b['bucket']} | {b['n']} | {b.get('with_bug', '—')} | {br} | "
+        ci = ("[%d%%, %d%%]" % (b["bug_rate_ci"][0] * 100, b["bug_rate_ci"][1] * 100)
+              if b.get("bug_rate_ci") and b["bug_rate_ci"][0] is not None else "—")
+        L.append(f"| {b['bucket']} | {b['n']} | {b.get('with_bug', '—')} | {br} | {ci} | "
                  f"{b['avg_score'] if b['avg_score'] is not None else '—'} |")
     L.append("")
     L.append(f"- 单调性：**{'通过' if calib['monotonic'] else '未通过'}**"
@@ -288,9 +355,13 @@ def render(agg, calib, sug, services):
         L.append("")
         L.append(f"下一步：{sug['next_step']}")
     else:
-        L.append(f"- 分桶单调性：{'通过' if sug['calibration_ok'] else '未通过'}")
-        L.append(f"- 结论：{sug['note']}")
-        L.append("")
+        if sug.get("level") == "temp":
+            L.append(f"**临时结论**（{sug['note']}）")
+            L.append("")
+        else:
+            L.append(f"- 分桶单调性：{'通过' if sug['calibration_ok'] else '未通过'}")
+            L.append(f"- 结论：{sug['note']}")
+            L.append("")
         L.append("| 项 | 建议动作 | 依据 |")
         L.append("|---|---|---|")
         for r in sug["recommendations"]:
@@ -299,8 +370,10 @@ def render(agg, calib, sug, services):
     L.append("")
     L.append("---")
     L.append("")
-    L.append("＊样本量决定可信度：本报告的所有结论仅在样本充足时才具统计意义。"
-             "样本量偏少时，请把本报告当作「数据链路已通」的证明，而非权重结论。")
+    L.append("＊样本量决定可信度：≥%d 个给完整建议；%d-%d 个只给带 Wilson 区间的临时结论；"
+             "低于 %d 个只诊断。所有「命中率」均附 95%% 置信区间 —— 裸比率在小样本下是自欺。"
+             % (MIN_SAMPLES_FOR_CALIBRATION, MIN_SAMPLES_TEMP, MIN_SAMPLES_FOR_CALIBRATION,
+                MIN_SAMPLES_TEMP))
     return "\n".join(L)
 
 

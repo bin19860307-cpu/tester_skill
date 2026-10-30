@@ -66,6 +66,7 @@
 | `records[].metrics.risk_score_source` | string | ✅ | 血缘：`script:scoring.canonical_risk_score(静态5维)` |
 | `records[].metrics.risk_score_enhanced` | number\|null | ❌ | 增强十维分（有历史度量时写入），**禁止参与趋势连线** |
 | `records[].metrics.risk_score_legacy` | number | ❌ | 旧公式值，**仅留审计**，不得当作当前分使用 |
+| `records[].metrics.risk_confidence` | object | ❌ | 独立置信度（v1.2.0 起 rescore 写入）：`confidence`(0-1) / `confidence_level`(high|medium|low) / `routing`(auto|review_then_auto|manual) / `components` / `reasons` / `rules_version` |
 | `records[].modules` | array | ❌ | 模块级汇总 |
 | `records[].detections` | object | ✅ | 五项专项检测命中结果 |
 
@@ -77,12 +78,16 @@
 metrics.risk_score            ← 静态 5 维确定性分（0-100），趋势唯一口径，跨版本可比
 metrics.risk_score_enhanced   ← 增强 10 维分（有历史度量时才写），不可与上者混用
 metrics.risk_score_legacy     ← 旧公式值 min(100, high*10 + medium*5 + low*1)，仅留档审计
+metrics.risk_confidence       ← 独立置信度（v1.2.0）：答"对这个判断有多确信"，
+                                 与 risk_score（答"多危险"）正交；high≥0.75 自动分流 /
+                                 medium 0.55-0.75 抽查后分流 / low<0.55 人工复核
 ```
 
 > ⚠️ `min(100, high*10 + medium*5 + low*1)` 是**已弃用的旧公式**，其值只以
 > `risk_score_legacy` 形式留档。任何文档、报告或 PPT 若把该公式当作 `risk_score` 的口径，
 > 都属于过期口径。写盘后必须满足：`risk_score_mode == "static"`，且落盘值 == 用当前
-> 评分代码重算的结果（容差 0.01）——由 `scripts/doctor.py` 的 D5 检查项机器校验。
+> 评分代码重算的结果（容差 0.01）——由 `scripts/doctor.py` 的 D5/D8 检查项机器校验；
+> 跨规则版本/跨评分模式的记录混在同一趋势里由 **D10** 报告（跨口径不可比）。
 
 ---
 

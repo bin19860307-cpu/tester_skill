@@ -85,6 +85,65 @@ class TestD8Reproducible:
         assert any("risk_score_mode 不是 static" in i for i in d8["issues"])
 
 
+class TestD10VersionDrift:
+    """缺口③b（2026-09-30）：跨版本/跨口径漂移回归。
+
+    D8 盲区：全部记录能用当前代码复现 ≠ 同一口径产出。
+    rules 1.0 与 1.1、static 与 enhanced 混在一组趋势里就是漂移。
+    """
+
+    def test_single_provenance_clean(self, workspace):
+        """rescore 后全部记录同口径 → 只可能报 unknown 缺失（不应有跨口径告警）。"""
+        ws, ar, rr = workspace
+        sa.sync_service("demo-svc", ar)
+        d10 = doctor.check_d10_version_drift("demo-svc", ar)
+        cross = [i for i in d10["issues"] if "种口径共存" in i]
+        assert not cross, cross
+
+    def test_mixed_rules_versions_flagged(self, workspace):
+        """两个 rating_rules_version 共存 → 必须报「跨口径不可比」。"""
+        ws, ar, rr = workspace
+        sa.sync_service("demo-svc", ar)
+        p = _metrics_path(ar)
+        doc = _load(p)
+        doc["records"][0]["metrics"]["rating_rules_version"] = "1.0"   # 模拟老口径残留
+        _save(p, doc)
+        d10 = doctor.check_d10_version_drift("demo-svc", ar)
+        assert any("种口径共存" in i for i in d10["issues"])
+        assert d10["detail"]["groups"] == 2
+
+    def test_unknown_provenance_reported(self, workspace):
+        """rescore 前的老数据（无 rules/mode）→ 单独归 unknown 组并提示补血缘。"""
+        ws, ar, rr = workspace
+        p = _metrics_path(ar)
+        doc = _load(p)
+        for r in doc["records"]:      # 抹掉全部 provenance
+            r["metrics"].pop("rating_rules_version", None)
+            r["metrics"].pop("risk_score_mode", None)
+        _save(p, doc)
+        d10 = doctor.check_d10_version_drift("demo-svc", ar)
+        assert any("无 provenance" in i for i in d10["issues"])
+
+    def test_group_level_reproducibility(self, workspace):
+        """组内不可复现（同组里手改一条分数）→ 按「组」点名。"""
+        ws, ar, rr = workspace
+        sa.sync_service("demo-svc", ar)
+        p = _metrics_path(ar)
+        doc = _load(p)
+        doc["records"][0]["metrics"]["risk_score"] = 42.0
+        _save(p, doc)
+        d10 = doctor.check_d10_version_drift("demo-svc", ar)
+        assert any("组内不可复现" in i for i in d10["issues"])
+
+    def test_in_run_doctor(self, workspace):
+        """D10 已接入 run_doctor 主流程（D8 之后）。"""
+        ws, ar, rr = workspace
+        results = doctor.run_doctor(["demo-svc"], ar, rr, fix=False)
+        ids = [c["id"] for c in results[0]["checks"]]
+        assert "D10" in ids
+        assert ids.index("D8") < ids.index("D10")
+
+
 class TestD2VersionKeys:
     def test_reports_inconsistency_with_variants(self, workspace):
         """夹具刻意让 metrics 带 business- 前缀、bugs 用裸号 → D2 必须报出两种写法。"""

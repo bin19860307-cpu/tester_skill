@@ -9,7 +9,9 @@ import pytest
 
 import scoring
 from scoring import (derive_stats, canonical_risk_score, rate_change,
-                     detect_data_format_change, RATING_RULES_VERSION)
+                     detect_data_format_change, estimate_confidence,
+                     RATING_RULES_VERSION, CONFIDENCE_RULES_VERSION,
+                     CONF_HIGH, CONF_MEDIUM)
 
 
 REC = {
@@ -210,3 +212,80 @@ class TestDetectDataFormat:
     def test_reads_detections_flag(self):
         rec = {"detections": {"data_format_change": True}}
         assert detect_data_format_change(rec) is True
+
+
+class TestEstimateConfidence:
+    """缺口①（2026-09-30）：独立置信度 + 阈值分流。
+
+    设计动机（Jev 判断层学习沉淀）：risk_score 回答「多危险」，
+    confidence 回答「对这个危险判断本身有多确信」——输入残缺时
+    分数照样能算，但不该被拿去自动分流。
+    """
+
+    def test_deterministic(self):
+        assert estimate_confidence(REC) == estimate_confidence(dict(REC))
+
+    def test_complete_input_scores_high(self):
+        """REC 输入完整、信号一致 → 置信度应达 high 档。"""
+        c = estimate_confidence(REC)
+        assert c["confidence"] >= CONF_HIGH
+        assert c["confidence_level"] == "high"
+        assert c["routing"] == "auto"
+
+    def test_missing_inputs_lower_confidence(self):
+        """逐项删输入，置信度必须单调下降且给出可读原因。"""
+        full = estimate_confidence(REC)["confidence"]
+        no_files = dict(REC, files=[])
+        c1 = estimate_confidence(no_files)
+        assert c1["confidence"] < full
+        assert any("files" in r for r in c1["reasons"])
+
+        bare = {"metrics": {"files_changed": 2, "lines_added": 10, "lines_removed": 5}}
+        c2 = estimate_confidence(bare)
+        assert c2["confidence"] < c1["confidence"]
+        assert c2["components"]["input_completeness"]["checks_passed"] != "7/7"
+
+    def test_signal_contradiction_penalized(self):
+        """高分但评级判「纯样式低风险」→ 一致性分量必须重扣。"""
+        rec = {
+            "metrics": {"files_changed": 1, "lines_added": 300, "lines_removed": 200,
+                        "high_risk": 0, "medium_risk": 0, "low_risk": 1},
+            "modules": [{"name": "大重构", "files": 1, "risk": "low"}],
+            "detections": {"data_format_change": False, "version_rollback": False,
+                           "sensitive_info": False, "test_sync_needed": False,
+                           "circular_dependency": False},
+            "files": ["src/style/theme.scss"],
+        }
+        c = estimate_confidence(rec)
+        assert c["components"]["signal_consistency"]["value"] <= 0.6
+        assert any("信号" in r for r in c["reasons"])
+
+    def test_calibration_neutral_when_absent(self):
+        """未提供校准样本 → 0.5 中性并显式标注（不算错也不算对）。"""
+        c = estimate_confidence(REC)
+        assert c["components"]["calibration_support"]["value"] == 0.5
+        assert any("未提供" in r or "校准" in r for r in c["reasons"])
+
+    def test_calibration_scales_with_samples(self):
+        """30 样本=1.0、10 样本=0.5、0 样本=0.0（线性插值可复核）。"""
+        assert estimate_confidence(REC, calibration={"samples": 30})[
+            "components"]["calibration_support"]["value"] == 1.0
+        assert estimate_confidence(REC, calibration={"samples": 10})[
+            "components"]["calibration_support"]["value"] == 0.5
+        assert estimate_confidence(REC, calibration={"samples": 0})[
+            "components"]["calibration_support"]["value"] == 0.0
+
+    def test_rules_version_exposed(self):
+        assert estimate_confidence(REC)["rules_version"] == CONFIDENCE_RULES_VERSION
+
+    def test_canonical_includes_confidence_block(self):
+        """canonical_risk_score 返回值必须携带 confidence（缺口感收口）。"""
+        r = canonical_risk_score(REC)
+        assert "confidence" in r
+        assert r["confidence"]["confidence_level"] in ("high", "medium", "low")
+        assert r["confidence"]["routing"] in ("auto", "review_then_auto", "manual")
+
+    def test_no_recursion(self):
+        """confidence 内部不得再走 canonical_risk_score（曾有无限递归缺陷）。"""
+        c = estimate_confidence(REC)
+        assert c is not None  # 能返回即无递归爆栈；守卫：本测试先于修复会 RecursionError

@@ -210,6 +210,18 @@ class TestRescore:
             assert r["rating"]["code"] in ("high", "medium", "low")
             assert r["rating"]["rules_version"]
 
+    def test_confidence_persisted(self, workspace):
+        """缺口①（2026-09-30）：置信度随 rescore 落盘为 metrics.risk_confidence。"""
+        ws, ar, rr = workspace
+        sa.rescore_records("demo-svc", ar)
+        sm = _read(os.path.join(ar, "demo-svc", "service_metrics.json"))
+        for r in sm["records"]:
+            c = r["metrics"]["risk_confidence"]
+            assert 0.0 <= c["confidence"] <= 1.0
+            assert c["confidence_level"] in ("high", "medium", "low")
+            assert c["routing"] in ("auto", "review_then_auto", "manual")
+            assert c["rules_version"]
+
     def test_deterministic(self, workspace):
         ws, ar, rr = workspace
         sa.rescore_records("demo-svc", ar)

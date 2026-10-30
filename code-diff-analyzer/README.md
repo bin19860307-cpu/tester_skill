@@ -67,6 +67,7 @@ openpyxl>=3.1.0
 | `scripts/scoring.py` | Code Diff Analyzer · 统一口径模块（单一真源） |
 | `scripts/sync_analytics.py` | 数据沉淀确定性重建 + 完整性自检 |
 | `scripts/verify_precision.py` | 用真实命中率校准评分权重（把「规则引擎」升级为「项目校准模型」） |
+| `scripts/trace_judge.py` | Agent Trace 四级判断层：纯规则把 trace 分流为 正常/轻微/需人工/高风险，只把后两级升级给人工（零 LLM 调用、可复现） |
 
 ## 参考资源
 - `references/analysis-rules.md`
@@ -96,7 +97,7 @@ code-diff-analyzer/
 
 ## 版本
 
-当前 v1.1.3。
+当前 v1.2.0。
 
 ## 许可
 
