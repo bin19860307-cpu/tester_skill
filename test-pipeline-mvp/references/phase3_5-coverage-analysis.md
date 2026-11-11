@@ -153,7 +153,7 @@ def analyze_coverage(excel_path, flow_nodes, p0_nodes=None):
 
 
 # =====================
-#  使用示例（权益控制）
+#  使用示例（某模块）
 # =====================
 if __name__ == "__main__":
     # 流程图全节点（来自 Phase 1.5 节点清单）
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     ]
 
     result = analyze_coverage(
-        excel_path=r"C:\替换为实际路径\权益控制_测试用例_v1.0.xlsx",
+        excel_path=r"output/某模块_测试用例_v1.0.xlsx",
         flow_nodes=ALL_NODES,
         p0_nodes=P0_NODES,
     )

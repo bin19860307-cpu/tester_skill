@@ -1,21 +1,26 @@
 name: excel-testcase-18col
 display_name: Chane · 企业18列测试用例生成器
-version: 1.0.1
-author: chenb
-category: 测试效能
-description: "生成符合企业18列标准格式的测试用例Excel文件（参考班级管理测试用例_v2.xlsx模板）。 触发词：18列格式、企业模板、用例Excel、生成测试用例Excel、班级管理模板、按套件生成用例。 进阶能力：基线驱动（文案/链接抽单一数据源）+ 步骤与预期 1:1 编号配对（含 \"-\" 无需验证标记）+ 三表输出（测试用例/文案基线/链接基线）。"
+display_name_en: Excel Testcase 18 Columns
+version: 2.1.0
+author: Chane
+category: 测试提效
+description_zh: 生成符合企业 18 列标准格式的测试用例 Excel（基线驱动：文案/链接抽离单一数据源，步骤与预期 1:1 编号配对），支持按套件批量生成正式用例，并内置官方平台导入模板模式（选型统一 Y/Y/有效、类型 8 类枚举、物理 18 列、6 项生成后机器校验）。
+description_en: Generate enterprise-standard 18-column test case Excel files with baseline-driven single data source and 1:1 step-expectation pairing, supporting per-suite batch generation, plus a built-in official-platform import mode with strict enum selection, fixed 18 physical columns and 6 post-generation machine checks.
+description: "生成符合企业 18 列标准格式的测试用例 Excel。触发词：18列格式、18列模板、企业模板、用例Excel、生成测试用例Excel、按套件生成用例、导入用例平台、用例导入模板。进阶能力：基线驱动（文案/链接抽单一数据源）+ 步骤与预期 1:1 编号配对（含 \"-\" 无需验证标记）+ 三表输出（测试用例/文案基线/链接基线）+ 官方平台导入模式硬约束。"
 triggers:
-  - 分析 git diff
-  - 评估 PR 影响范围
-  - 制定回归测试计划
-  - tagdiff.txt 分析
-  - compare_vX_to_Y.md 分析
-  - 生成变更报告
+  - 18列格式
+  - 18列模板
+  - 企业模板
+  - 生成测试用例Excel
+  - 按套件生成用例
+  - 导入用例平台
+  - 用例导入模板
+  - 基线驱动用例
 tags:
-  - code-review
-  - diff
-  - risk-analysis
   - testing
-  - ci-cd
+  - testcase
+  - excel
+  - 18-column
+  - baseline-driven
   - agent-skill
 license: MIT
